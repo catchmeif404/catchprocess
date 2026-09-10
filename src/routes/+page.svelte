@@ -84,63 +84,68 @@
 </div>
 
 <style>
-  /* 외곽 박스 없음: 창 자체가 투명하고, 시각 요소는 카드와 텍스트뿐이다. */
+  /* 외곽 박스 없음: 창 자체가 투명하고, 종이 카드들과 작은 종이 조각만 떠 있다.
+     토큰은 app.css의 케이스 파일 팔레트(site와 동일 값)를 쓴다. */
   .widget {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.45rem;
     height: 100vh;
-    padding: 0.4rem;
+    padding: 0.45rem;
     box-sizing: border-box;
-    color: #f2f4f8;
-    font-family:
-      'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+    color: var(--ink);
+    font-family: var(--mono);
     font-size: 0.8rem;
     overflow: hidden;
   }
 
+  /* 헤더: site의 .upcoming-item처럼 작은 종이 조각(점선 테두리), 살짝 기울여 띄움 */
   header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.15rem 0.3rem 0.35rem;
-    /* 드래그 기능은 유지하되 커서 안내 없이 자연스럽게: 기본 커서, 텍스트 그림자로 가독성만 확보 */
-    text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
+    padding: 0.3rem 0.6rem;
+    border: 1px dashed rgba(36, 31, 26, 0.35);
+    background: var(--paper);
+    transform: rotate(-0.6deg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
     user-select: none;
   }
 
   .brand {
+    font-family: var(--serif-stamp);
     font-weight: 700;
-    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .count {
     flex: 1;
-    color: rgb(255 255 255 / 55%);
+    color: var(--ink-muted);
+    letter-spacing: 0.03em;
   }
 
   .close {
     flex: none;
     padding: 0 0.35rem;
     border: none;
-    border-radius: 6px;
+    border-radius: 2px;
     background: transparent;
-    color: rgb(255 255 255 / 50%);
+    color: var(--ink-muted);
     font-size: 0.9rem;
     line-height: 1.4;
     cursor: pointer;
-    text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
   }
 
   .close:hover {
-    background: rgb(255 255 255 / 12%);
-    color: #fff;
+    background: rgba(163, 43, 43, 0.12);
+    color: var(--stamp);
   }
 
   .list {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.35rem;
     margin: 0;
     padding: 0;
     overflow-y: auto;
@@ -152,15 +157,29 @@
     display: none;
   }
 
+  /* 서류 더미 느낌: 카드마다 미세한 기울임 (site .exhibit의 --rot 변주) */
+  .list :global(li:nth-child(2n)) {
+    transform: rotate(0.4deg);
+  }
+
+  .list :global(li:nth-child(2n + 1)) {
+    transform: rotate(-0.3deg);
+  }
+
   .status {
     margin: auto 0 0;
-    padding: 0.3rem 0.3rem 0;
-    color: rgb(255 255 255 / 45%);
+    padding: 0.2rem 0.5rem;
+    border: 1px dashed rgba(36, 31, 26, 0.3);
+    background: rgba(241, 233, 210, 0.85);
+    color: var(--ink-muted);
     font-size: 0.7rem;
-    text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
+    font-style: italic;
+    letter-spacing: 0.03em;
+    transform: rotate(-0.4deg);
   }
 
   .status.error {
-    color: #ff8a80;
+    color: var(--stamp);
+    font-style: normal;
   }
 </style>

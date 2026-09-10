@@ -8,19 +8,19 @@ describe('i18n', () => {
   });
 
   it('로케일을 바꾸면 같은 키의 문자열이 바뀐다', () => {
-    expect(t('empty')).toBe('no dev services detected');
+    expect(t('empty')).toBe('the desk is clear.');
 
     setLocale('ko');
     expect(getLocale()).toBe('ko');
-    expect(t('empty')).toBe('감지된 dev 서비스 없음');
+    expect(t('empty')).toBe('책상이 깨끗하네.');
   });
 
   it('{param} 플레이스홀더를 치환한다', () => {
     setLocale('en');
-    expect(t('servicesUp', { count: 4 })).toBe('4 running');
+    expect(t('servicesUp', { count: 4 })).toBe('subjects: 4');
 
     setLocale('ko');
-    expect(t('servicesUp', { count: 4 })).toBe('4개 실행 중');
+    expect(t('servicesUp', { count: 4 })).toBe('감시 대상 4개');
   });
 
   it('여러 파라미터와 숫자를 치환한다', () => {

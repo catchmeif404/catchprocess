@@ -7,9 +7,9 @@ export type Locale = 'en' | 'ko';
 export const MESSAGES = {
   en: {
     title: 'DevTopology',
-    servicesUp: '{count} running',
-    updatedAt: 'updated {time}',
-    empty: 'no dev services detected',
+    servicesUp: 'subjects: {count}',
+    updatedAt: 'filed {time}',
+    empty: 'the desk is clear.',
     scanFailed: 'scan failed — retrying…',
     cardAria: '{process} on port {ports}',
     close: 'close widget',
@@ -20,9 +20,9 @@ export const MESSAGES = {
   },
   ko: {
     title: 'DevTopology',
-    servicesUp: '{count}개 실행 중',
-    updatedAt: '{time} 갱신',
-    empty: '감지된 dev 서비스 없음',
+    servicesUp: '감시 대상 {count}개',
+    updatedAt: '보고 시각 {time}',
+    empty: '책상이 깨끗하네.',
     scanFailed: '스캔 실패 — 재시도 중…',
     cardAria: '{process} 포트 {ports}',
     close: '위젯 닫기',
