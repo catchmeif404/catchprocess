@@ -5,7 +5,7 @@
   import { SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
-  import { getLocale, t } from '$lib/i18n.svelte';
+  import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
   import type { Snapshot } from '$lib/types';
@@ -64,6 +64,23 @@
     <span class="count" data-tauri-drag-region>
       {t('servicesUp', { count: query.trim() ? visibleServices.length : serviceCount })}
     </span>
+    <div class="language" aria-label={t('language')}>
+      <button
+        class:active={getLocale() === 'en'}
+        type="button"
+        aria-label={t('switchToEnglish')}
+        aria-pressed={getLocale() === 'en'}
+        onclick={() => setLocale('en')}
+      >EN</button>
+      <span aria-hidden="true">/</span>
+      <button
+        class:active={getLocale() === 'ko'}
+        type="button"
+        aria-label={t('switchToKorean')}
+        aria-pressed={getLocale() === 'ko'}
+        onclick={() => setLocale('ko')}
+      >KO</button>
+    </div>
     <button
       class="close"
       type="button"
@@ -154,6 +171,35 @@
     font-size: 0.9rem;
     line-height: 1.4;
     cursor: pointer;
+  }
+
+  .language {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    color: var(--ink-muted);
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+  }
+
+  .language button {
+    padding: 0.1rem 0.15rem;
+    border: none;
+    background: transparent;
+    color: var(--ink-muted);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .language button.active {
+    color: var(--stamp);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 0.15rem;
+  }
+
+  .language button:hover {
+    color: var(--stamp);
   }
 
   .close:hover {
