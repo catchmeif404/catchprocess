@@ -5,6 +5,7 @@
 pub mod filter;
 pub mod project;
 pub mod registry;
+pub mod stop;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

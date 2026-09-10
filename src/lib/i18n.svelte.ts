@@ -13,6 +13,10 @@ export const MESSAGES = {
     scanFailed: 'scan failed — retrying…',
     cardAria: '{process} on port {ports}',
     close: 'close widget',
+    stop: 'stop service',
+    confirmStop: 'confirm?',
+    stopping: 'stopping…',
+    stopFailed: 'stop failed',
   },
   ko: {
     title: 'DevTopology',
@@ -22,6 +26,10 @@ export const MESSAGES = {
     scanFailed: '스캔 실패 — 재시도 중…',
     cardAria: '{process} 포트 {ports}',
     close: '위젯 닫기',
+    stop: '서비스 중지',
+    confirmStop: '정말?',
+    stopping: '중지 중…',
+    stopFailed: '중지 실패',
   },
 } as const;
 

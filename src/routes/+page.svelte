@@ -16,29 +16,34 @@
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
   );
 
-  $effect(() => {
-    // 폴링 요청 겹침(느린 스캔 + 짧은 주기) 시 이전 요청의 늦은 응답이 최신 상태를 덮어쓰는
-    // race condition을 시퀀스 번호로 차단한다 — 마지막 요청의 응답만 상태에 반영.
-    let requestSeq = 0;
+  // 폴링 요청 겹침(느린 스캔 + 짧은 주기) 시 이전 요청의 늦은 응답이 최신 상태를 덮어쓰는
+  // race condition을 시퀀스 번호로 차단한다 — 마지막 요청의 응답만 상태에 반영.
+  let requestSeq = 0;
 
-    const poll = async (): Promise<void> => {
-      const seq = ++requestSeq;
-      try {
-        const next = await fetchSnapshot();
-        if (seq === requestSeq) {
-          snapshot = next;
-          failed = false;
-        }
-      } catch {
-        // 실패해도 폴링은 계속한다. 조용히 삼키지 않고 UI에 실패 상태를 표시.
-        if (seq === requestSeq) {
-          failed = true;
-        }
+  async function load(): Promise<void> {
+    const seq = ++requestSeq;
+    try {
+      const next = await fetchSnapshot();
+      if (seq === requestSeq) {
+        snapshot = next;
+        failed = false;
       }
-    };
+    } catch {
+      // 실패해도 폴링은 계속한다. 조용히 삼키지 않고 UI에 실패 상태를 표시.
+      if (seq === requestSeq) {
+        failed = true;
+      }
+    }
+  }
 
-    void poll();
-    const timer = setInterval(() => void poll(), SCAN_INTERVAL_MS);
+  // 카드의 중지 버튼이 성공하면 3초 폴링을 기다리지 않고 즉시 재스캔한다.
+  const onstop = (): void => {
+    void load();
+  };
+
+  void load();
+  $effect(() => {
+    const timer = setInterval(() => void load(), SCAN_INTERVAL_MS);
     return () => clearInterval(timer);
   });
 </script>
@@ -67,7 +72,7 @@
   {:else if snapshot && snapshot.services.length > 0}
     <ul class="list">
       {#each snapshot.services as service (service.pid)}
-        <ServiceCard {service} />
+        <ServiceCard {service} {onstop} />
       {/each}
     </ul>
     {#if updatedAt}

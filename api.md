@@ -46,6 +46,24 @@ Rust 커맨드를 아래에 문서화한다.
 - **사용하는 화면/컴포넌트**: `src/routes/+page.svelte` (3초 폴링, `lib/api.ts` 경유).
 - **비고**: 로컬 머신 밖으로 나가는 데이터 없음. 파일 내용을 읽지 않음.
 
+## `stop_service`
+
+- **Method**: Tauri IPC invoke (HTTP 아님)
+- **URL**: 없음 (커맨드 이름 `stop_service`)
+- **Request Headers**: 없음
+- **Parameters**: `pid` (number) — 중지할 서비스의 프로세스 ID
+- **Request Body**: 없음
+- **Success Response**: 없음 (`void`)
+- **Error Response**: invoke promise rejection (문자열). pid가 없거나 OS가 거부한 경우
+  (예: 권한 없는 프로세스) 실패 메시지와 함께 reject.
+- **사용하는 화면/컴포넌트**: `src/lib/components/ServiceCard.svelte`의 중지 버튼
+  (2단계 확인 후 호출, `lib/api.ts` 경유).
+- **비고**: unix는 `kill -TERM`(정상 종료 신호)만 보낸다 — SIGKILL은 제공하지 않는다.
+  Windows는 우아한 종료 신호가 없어 `taskkill /PID <pid> /F`(강제)로 대체.
+  성공해도 프로세스가 즉시 사라진다는 보장은 없으며, 위젯은 재스캔 후 사라짐을 반영한다.
+
 ## 변경 이력
 
 - v0.1 (2026-09-10): `get_services` 최초 정의.
+- v0.1.1 (2026-09-10): `get_services` 응답에 `command`, `project` 추가.
+- v0.1.2 (2026-09-10): `stop_service` 최초 정의.
