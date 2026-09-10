@@ -1,7 +1,7 @@
 <script lang="ts">
   // 러닝 서비스 1개를 표시하는 카드.
   // 1행: 프로젝트 이름(git 저장소명, 없으면 프로세스명) + 포트 + 중지 버튼
-  // 2행: 프로세스명 · PID · 브랜치 + 명령줄 요약(말줄임, 풀 텍스트는 툴팁)
+  // 2행: 프로세스명 · PID · 브랜치
   // 중지 버튼은 2단계 확인: 첫 클릭에 확인 상태가 되고(3초 후 자동 해제),
   // 다시 클릭해야 SIGTERM이 전송된다. 상태 도트는 항상 초록 — 스냅샷에는
   // 리슨 중인 것만 담기므로 존재 자체가 RUNNING을 의미한다.
@@ -88,11 +88,8 @@
       {confirming ? t('confirmStop') : '■'}
     </button>
   </div>
-  <div class="meta" title={service.command || undefined}>
+  <div class="meta">
     <span>{metaParts.join(' · ')}</span>
-    {#if !failed && !stopping && service.command}
-      <span class="cmd">{service.command}</span>
-    {/if}
   </div>
 </li>
 
@@ -163,21 +160,8 @@
   }
 
   .meta {
-    display: flex;
-    gap: 0.5rem;
-    min-width: 0;
     padding-left: 1.3rem;
     color: rgb(255 255 255 / 40%);
     font-size: 0.68rem;
-  }
-
-  .meta > span:first-child {
-    flex: none;
-  }
-
-  .cmd {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 </style>

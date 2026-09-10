@@ -32,8 +32,8 @@ describe('ServiceCard', () => {
     expect(screen.getByText('my-app-backend')).toBeInTheDocument();
     expect(screen.getByText(':8080 :8081')).toBeInTheDocument();
     expect(screen.getByText('java · #55231 · feature/login')).toBeInTheDocument();
-    // 명령줄은 말줄임 표시 대상이지만 툴팁(title)으로 풀 텍스트를 제공한다.
-    expect(screen.getByTitle('java -jar build/libs/api.jar')).toBeInTheDocument();
+    // 명령줄(폴더 경로 포함)은 화면에 표시하지 않는다 — API 데이터로만 존재.
+    expect(screen.queryByText('java -jar build/libs/api.jar')).not.toBeInTheDocument();
   });
 
   it('프로젝트가 없으면 프로세스명이 제목이 된다', () => {
