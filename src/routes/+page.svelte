@@ -53,7 +53,7 @@
 </svelte:head>
 
 <div class="widget">
-  <!-- 프레임리스 창 드래그 영역: 헤더 전체 -->
+  <!-- 프레임리스 창 드래그 영역: 헤더 전체. 시각적 "바" 없이 텍스트만 떠 있다. -->
   <header data-tauri-drag-region>
     <span class="brand" data-tauri-drag-region>{t('title')}</span>
     <span class="count" data-tauri-drag-region>{t('servicesUp', { count: serviceCount })}</span>
@@ -84,15 +84,14 @@
 </div>
 
 <style>
+  /* 외곽 박스 없음: 창 자체가 투명하고, 시각 요소는 카드와 텍스트뿐이다. */
   .widget {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
     height: 100vh;
-    padding: 0.6rem;
+    padding: 0.4rem;
     box-sizing: border-box;
-    border-radius: 12px;
-    background: rgb(18 20 24 / 88%);
     color: #f2f4f8;
     font-family:
       'SF Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -104,9 +103,9 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.15rem 0.2rem 0.45rem;
-    border-bottom: 1px solid rgb(255 255 255 / 12%);
-    cursor: grab;
+    padding: 0.15rem 0.3rem 0.35rem;
+    /* 드래그 기능은 유지하되 커서 안내 없이 자연스럽게: 기본 커서, 텍스트 그림자로 가독성만 확보 */
+    text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
     user-select: none;
   }
 
@@ -130,6 +129,7 @@
     font-size: 0.9rem;
     line-height: 1.4;
     cursor: pointer;
+    text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
   }
 
   .close:hover {
@@ -144,13 +144,20 @@
     margin: 0;
     padding: 0;
     overflow-y: auto;
+    /* 사이드 스크롤바 숨김 — 휠/트랙패드 스크롤은 동작한다 */
+    scrollbar-width: none;
+  }
+
+  .list::-webkit-scrollbar {
+    display: none;
   }
 
   .status {
     margin: auto 0 0;
-    padding: 0.3rem 0.2rem 0;
+    padding: 0.3rem 0.3rem 0;
     color: rgb(255 255 255 / 45%);
     font-size: 0.7rem;
+    text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
   }
 
   .status.error {
