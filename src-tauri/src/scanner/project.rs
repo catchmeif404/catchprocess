@@ -47,6 +47,16 @@ pub fn is_gradle_daemon_path(path: &Path) -> bool {
     false
 }
 
+/// Homebrew is itself a Git checkout, but directories under its installation prefix are not
+/// user projects. Treat those paths as ordinary service directories instead of showing the
+/// misleading `homebrew · stable` project label on database cards.
+pub fn is_homebrew_root(path: &Path) -> bool {
+    matches!(
+        path.to_string_lossy().as_ref(),
+        "/opt/homebrew" | "/usr/local/Homebrew" | "/usr/local/homebrew"
+    )
+}
+
 /// `git rev-parse --show-toplevel --abbrev-ref HEAD` 출력을 파싱한다.
 /// 첫 줄은 저장소 루트, 둘째 줄은 브랜치 이름.
 pub fn parse_git_output(output: &str) -> Option<(String, String)> {
@@ -76,11 +86,13 @@ pub fn resolve(cwd: Option<&Path>) -> Option<ProjectInfo> {
             if let Some((toplevel, branch)) = parse_git_output(&String::from_utf8_lossy(&output.stdout))
             {
                 let path = Path::new(&toplevel).to_path_buf();
-                return Some(ProjectInfo {
-                    name: derive_name(&path),
-                    path: toplevel,
-                    branch: Some(branch),
-                });
+                if !is_homebrew_root(&path) {
+                    return Some(ProjectInfo {
+                        name: derive_name(&path),
+                        path: toplevel,
+                        branch: Some(branch),
+                    });
+                }
             }
         }
     }
@@ -111,6 +123,13 @@ mod tests {
     fn detects_gradle_daemon_directory() {
         assert!(is_gradle_daemon_path(Path::new("/Users/k/.gradle/daemon/9.7.1")));
         assert!(!is_gradle_daemon_path(Path::new("/Users/k/projects/app/.gradle")));
+    }
+
+    #[test]
+    fn identifies_homebrew_installation_roots() {
+        assert!(is_homebrew_root(Path::new("/opt/homebrew")));
+        assert!(is_homebrew_root(Path::new("/usr/local/Homebrew")));
+        assert!(!is_homebrew_root(Path::new("/Users/k/projects/homebrew-app")));
     }
 
     #[test]
