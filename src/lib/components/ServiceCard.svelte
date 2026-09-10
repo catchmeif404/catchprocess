@@ -100,7 +100,8 @@
     gap: 0.1rem;
     padding: 0.4rem 0.6rem;
     border-radius: 8px;
-    background: rgb(255 255 255 / 6%);
+    /* 외곽 컨테이너가 없으므로 카드 자체가 어두운 반투명 배경을 가진다. */
+    background: rgb(18 20 24 / 88%);
     list-style: none;
   }
 
