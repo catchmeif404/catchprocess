@@ -133,6 +133,16 @@ pub fn scan() -> Snapshot {
         }
     }
 
+    // Gradle daemons are Java processes with listening control ports, but they are build
+    // infrastructure rather than services owned by a project. Hide them after cwd enrichment
+    // so ordinary Java application servers remain visible.
+    services.retain(|service| {
+        !service
+            .project
+            .as_ref()
+            .is_some_and(|project| project::is_gradle_daemon_path(std::path::Path::new(&project.path)))
+    });
+
     Snapshot {
         services,
         generated_at: epoch_millis(),

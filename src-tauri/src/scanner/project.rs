@@ -30,6 +30,23 @@ pub fn derive_name(path: &Path) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Returns whether a process is a Gradle background daemon rather than an app service.
+/// Gradle daemons use a versioned working directory under `.gradle/daemon` and should not
+/// appear as development services in the widget.
+pub fn is_gradle_daemon_path(path: &Path) -> bool {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        if component.as_os_str() == ".gradle"
+            && components
+                .next()
+                .is_some_and(|next| next.as_os_str() == "daemon")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// `git rev-parse --show-toplevel --abbrev-ref HEAD` 출력을 파싱한다.
 /// 첫 줄은 저장소 루트, 둘째 줄은 브랜치 이름.
 pub fn parse_git_output(output: &str) -> Option<(String, String)> {
@@ -88,6 +105,12 @@ mod tests {
     #[test]
     fn derive_name_handles_root() {
         assert_eq!(derive_name(Path::new("/")), "unknown");
+    }
+
+    #[test]
+    fn detects_gradle_daemon_directory() {
+        assert!(is_gradle_daemon_path(Path::new("/Users/k/.gradle/daemon/9.7.1")));
+        assert!(!is_gradle_daemon_path(Path::new("/Users/k/projects/app/.gradle")));
     }
 
     #[test]
