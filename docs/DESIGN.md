@@ -1,248 +1,183 @@
 # devtopology design
 
-`devtopology` answers one question about the local machine: **what is running, and what is it
-connected to?** It scans live processes, listening ports, working directories, and project
-configuration files, then renders the result as a topology graph. The v0.1 milestone is a thin
-end-to-end slice: detect processes and ports, classify them into services, and show them as nodes
-in a web dashboard. Connection detection (edges) starts in v0.2.
+`devtopology` answers one question about the local machine: **what is running right now?** The
+v0.1 product is an always-on-top desktop widget (macOS + Windows) that shows the developer
+services currently listening on local ports — process name, port, PID, status — refreshed live.
 
-The product concept and long-term vision live in the workspace memory repo
-(`catchmeif404memory/projects/upcomming project/DevTopology_Design_Document.md`). This document is
-the implementation design: what is built now, how, and what comes next.
+The full product concept (connection detection, dependency graphs, diagnostics) lives in the
+workspace memory repo (`catchmeif404memory/projects/upcomming project/DevTopology_Design_Document.md`).
+This document is the implementation design for v0.1 and the roadmap after it.
 
-## Stack decisions
+## Decision trail
 
-- **TypeScript everywhere.** CLI, scanner core, local API, and web dashboard are one language.
-  This matches `gitguard` (ESM, TS strict, Node >= 20) and keeps the toolchain small. The concept
-  document proposed Go; the trade-off was decided in favor of a single-language npm-distributed
-  tool. If process scanning ever needs Go-level performance or a single binary, the scanner
-  interface is the seam to swap.
-- **Zero runtime dependencies in the core.** Argument parsing, table rendering, and the HTTP
-  server are hand-rolled on `node:*` builtins, like gitguard. The `web/` app is the only place
-  with a dependency tree (React, React Flow, Vite).
-- **macOS first, Linux behind the same interface.** Process and port discovery is isolated behind
-  a `PlatformAdapter` so Linux (`ss`, `/proc`) can be added without touching the resolver.
-  Windows is out of scope for v0.1.
+The concept document proposed a Go agent with a React web dashboard. Implementation design
+narrowed it in three steps, each a deliberate scope cut:
 
-## Current architecture (v0.1 target)
+1. **Pure viewer first.** v0.1 shows running processes and ports. Project mapping, framework
+   detection, connections, and diagnostics are later phases (see Roadmap).
+2. **Widget, not web.** The view must live on the monitor like a widget, not in a browser tab.
+   A frameless always-on-top Tauri window replaces the HTTP server + web dashboard entirely.
+3. **Rust scanner.** Tauri has no Node runtime, so the scanner lives in Rust (`sysinfo` +
+   `netstat2` crates). This makes the widget fully self-contained — no Node on the user's
+   machine, no shell-command output parsing — and cross-platform from one codebase.
+
+Consequences of step 3: TypeScript exists only in the UI layer (Svelte). The "zero-dependency
+TS CLI" idea from earlier drafts is dropped; if a CLI surface is ever needed, it becomes a Rust
+subcommand of the same core.
+
+## Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Widget shell | Tauri 2 | frameless, transparent, always-on-top window |
+| UI | Svelte 5 + TypeScript | Vite build; follow the workspace Svelte coding rules |
+| Scanner | Rust | `sysinfo` (process list) + `netstat2` (listen sockets, port↔pid) |
+| Serialization | `serde` / `serde_json` | one shared JSON shape across the IPC boundary |
+| Window state | `tauri-plugin-window-state` | remembers widget position/size across launches |
+
+Development requires the Rust toolchain on both build machines (mac here, Windows machine for
+the win target). Users install prebuilt bundles; they need nothing else.
+
+## Architecture
 
 ```text
-CLI entrypoint
-  └─ commands
-      ├─ PlatformAdapter        (process list, listen table, cwd)
-      ├─ FrameworkDetector      (marker files -> framework)
-      ├─ ServiceResolver        (process + cwd + framework -> service node)
-      ├─ InfraClassifier        (known process/port -> infra node)
-      ├─ TopologyBuilder        (nodes -> Topology model)
-      └─ Renderers
-          ├─ table (scan, ports)
-          └─ json (--json)
-  └─ serve
-      ├─ LocalApi (127.0.0.1:4747, GET /api/topology)
-      └─ static web/ build (React + React Flow node graph)
+┌─────────────────────────────────────────────┐
+│ Tauri process (single binary + webview)     │
+│                                             │
+│  ┌──────────────┐  invoke('get_services')   │
+│  │ Svelte UI    │ ────────────────────────► │
+│  │ widget cards │ ◄──────────────────────── │
+│  └──────────────┘   Snapshot (JSON, IPC)    │
+│                            │                │
+│                   ┌────────▼─────────┐      │
+│                   │ scanner (Rust)   │      │
+│                   │  ├─ sysinfo      │ processes (name, pid)
+│                   │  ├─ netstat2     │ listen sockets (port ↔ pid)
+│                   │  └─ registry     │ dev-relevance filter
+│                   └──────────────────┘      │
+└─────────────────────────────────────────────┘
 ```
 
-`src/index.ts` only starts `runCli`. Scanner output parsing belongs in pure functions that take
-command output strings, so every parser is unit-testable against recorded fixtures without
-spawning processes.
+- The UI polls `get_services` every 3 seconds (Tauri `invoke`). No events, no daemon, no
+  background threads beyond the scan itself; a scan is a single `sysinfo` refresh + socket table
+  read.
+- No network egress, no file contents are read, nothing leaves the machine.
+
+## Data model
+
+One JSON shape, defined in Rust and mirrored in `src/lib/types.ts`:
+
+```ts
+interface Service {
+  pid: number;
+  process: string;      // "node", "java", "postgres", ...
+  ports: number[];      // all TCP ports this pid is listening on
+}
+
+interface Snapshot {
+  services: Service[];  // filtered to dev-relevant, sorted by port
+  generatedAt: string;  // ISO 8601
+  host: { os: 'macos' | 'windows'; hostname: string };
+}
+```
+
+v0.1 has no `status` field beyond presence: a service appears because it is listening, so it is
+RUNNING by construction. `CONFIGURED`/`CONFLICT` states arrive with the diagnostics phase.
+
+## Dev-relevance filter
+
+`sysinfo` sees every process; the widget must not. The rule lives in one Rust module
+(`scanner/registry.rs`), the only place raw port/process-name constants exist:
+
+- **Allowlist by process name** — `node`, `java`, `python`, `ruby`, `go`, `postgres`,
+  `redis-server`, `mongod`, `kafka`, `elasticsearch`, `rabbitmq`, `dotnet`, `php-fpm`, ...
+- **Allowlist by known dev port** — 3000, 5173, 5174, 8000, 8080, 8081, 5432, 3306, 6379, 9092,
+  27017, 9200, 5672, ...
+- A pid is shown when it matches either list; a listening pid matching neither is dropped.
+- `include_all_listeners` (compile-time const in v0.1) widens this to "every TCP listener" for
+  debugging the filter itself.
+
+The filter is a pure function over `(process table, socket table)`, unit-tested with synthetic
+input — the sysinfo/netstat2 calls stay at the edge.
+
+## Widget shell spec (Tauri window)
+
+- Frameless, transparent, always-on-top, skip-taskbar; background opacity ~0.9.
+- The header row is the drag region. It shows the app name, the live service count, and a close
+  button. Right-click opens a small context menu (v0.1: quit; language toggle if implemented).
+- Position and size persist across launches via `tauri-plugin-window-state`.
+- Click-through is intentionally out of v0.1 (it makes the close button unusable); revisit if
+  asked for.
+- Launch is manual in v0.1. Autostart (`tauri-plugin-autostart`) and tray mode are roadmap items.
+
+## UI spec (Svelte)
+
+- A single column of service cards sorted by port: process name, `:port` list, PID in muted
+  text, a green status dot.
+- Header: `DevTopology` + count of running services + relative "updated Ns ago" timestamp.
+- Empty state: "no dev services detected" (both locales).
+- UI strings come from one `i18n.ts` module with `en`/`ko` maps — bilingual from day one per the
+  workspace rule; the widget surface is small enough that this is one file, not a framework.
+- Styling targets the case-file identity later; v0.1 keeps a neutral dark translucent card
+  look. No graph library, no router, no state library — Svelte runes and one polling `setInterval`.
 
 ## Repository layout
 
 ```text
 devtopology/
-├── src/
-│   ├── index.ts                 # thin entrypoint
-│   ├── cli/
-│   │   ├── runCli.ts
-│   │   └── commands/
-│   │       ├── scan.ts
-│   │       ├── ports.ts
-│   │       └── serve.ts
-│   ├── platform/
-│   │   ├── types.ts             # PlatformAdapter interface
-│   │   ├── macos.ts             # ps / lsof adapters
-│   │   ├── linux.ts             # v0.1: stub, throws UnsupportedPlatformError
-│   │   └── fixtures/            # recorded command output for tests
-│   ├── project/
-│   │   └── frameworkDetector.ts
-│   ├── resolver/
-│   │   ├── serviceResolver.ts
-│   │   └── infraClassifier.ts
-│   ├── topology/
-│   │   ├── model.ts
-│   │   └── buildTopology.ts
-│   ├── registry/
-│   │   └── devPorts.ts          # typed known-port/process registry
-│   ├── render/
-│   │   └── table.ts
-│   ├── server/
-│   │   └── httpServer.ts
-│   └── types.ts
-├── web/
+├── src-tauri/
 │   ├── src/
-│   │   ├── App.tsx
-│   │   ├── api/client.ts        # fetch /api/topology, 5s polling
-│   │   ├── graph/TopologyCanvas.tsx
-│   │   ├── graph/ServiceNode.tsx
-│   │   └── i18n/                # en + ko dictionaries from day one
-│   ├── package.json
-│   └── vite.config.ts
+│   │   ├── lib.rs              # tauri builder, window config, command registration
+│   │   ├── commands.rs         # get_services invoke handler
+│   │   └── scanner/
+│   │       ├── mod.rs          # Service, Snapshot; scan() assembly
+│   │       ├── registry.rs     # the only file with port/name constants
+│   │       └── filter.rs       # pure filtering logic (unit-tested)
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── src/
+│   ├── App.svelte
+│   ├── main.ts
+│   └── lib/
+│       ├── api.ts              # invoke('get_services') + 3s poll
+│       ├── types.ts            # mirror of the Rust Snapshot
+│       ├── i18n.ts             # en / ko strings
+│       └── ServiceCard.svelte
 ├── docs/DESIGN.md
-├── package.json                 # bin: devtopology
-├── tsconfig.json
-└── vitest.config.ts
+├── package.json                # @tauri-apps/cli, vite, svelte, vitest
+└── README.md
 ```
-
-## Data model
-
-The concept document's model, narrowed to v0.1. `Edge` and `Evidence` are defined now but always
-empty; the resolver only produces nodes.
-
-```ts
-type NodeType =
-  | 'FRONTEND' | 'BACKEND' | 'DATABASE' | 'CACHE'
-  | 'MESSAGE_BROKER' | 'EXTERNAL_API' | 'CONTAINER' | 'UNKNOWN';
-
-type RuntimeStatus = 'RUNNING' | 'CONFIGURED' | 'NOT_RUNNING' | 'UNKNOWN' | 'CONFLICT';
-
-type Framework = 'VITE' | 'REACT' | 'NEXT' | 'SPRING_BOOT' | 'NODE' | 'PYTHON' | 'DOCKER_COMPOSE';
-
-interface PortInfo { port: number; address: string; }
-
-interface NodeRuntime {
-  pid?: number;              // absent for infra nodes detected by port only
-  status: RuntimeStatus;     // v0.1 produces RUNNING or UNKNOWN only
-  ports: PortInfo[];
-}
-
-interface NodeProject {
-  path: string;
-  framework?: Framework;
-  gitBranch?: string;
-}
-
-interface TopologyNode {
-  id: string;                // `proc:{pid}` or `infra:{kind}:{port}`
-  type: NodeType;
-  name: string;              // service name or process name
-  runtime: NodeRuntime;
-  project?: NodeProject;
-}
-
-interface Edge { id: string; source: string; target: string; } // reserved for v0.2
-
-interface Topology {
-  nodes: TopologyNode[];
-  edges: Edge[];
-  generatedAt: string;       // ISO 8601
-  host: { os: string; hostname: string };
-}
-```
-
-Rule that follows the workspace coding guidelines: no dynamic types, no hardcoded port/process
-strings outside `registry/devPorts.ts`. That module is the single source of known dev
-infrastructure:
-
-```ts
-const KNOWN_PORTS = {
-  3000: 'NODE', 5173: 'VITE', 8000: 'PYTHON', 8080: 'SPRING_BOOT', 8081: 'SPRING_BOOT',
-  5432: 'POSTGRES', 3306: 'MYSQL', 27017: 'MONGODB',
-  6379: 'REDIS', 9092: 'KAFKA', 5672: 'RABBITMQ', 9200: 'ELASTICSEARCH',
-} as const;
-
-const KNOWN_PROCESS_NAMES = ['postgres', 'redis-server', 'mongod', 'kafka', 'elasticsearch',
-  'rabbitmq', 'java', 'node', 'python', 'ruby'] as const;
-```
-
-## Scan pipeline
-
-1. **Process list.** `ps -axo pid=,ppid=,comm=,args=` parsed into `ProcessEntry`.
-2. **Listen table.** `lsof -nP -iTCP -sTCP:LISTEN` parsed into `port -> pid` entries (v0.1:
-   TCP only, IPv4+IPv6 deduplicated).
-3. **Working directory.** For each listening pid, `lsof -a -p {pid} -d cwd -Fn` yields the cwd.
-   Cached per pid for one scan.
-4. **Framework detection.** At the cwd, check marker files in priority order: `next.config.*`
-   (NEXT), `vite.config.*` (VITE), `pom.xml`/`build.gradle*` (SPRING_BOOT), `package.json`
-   (NODE/REACT), `manage.py`/`pyproject.toml` (PYTHON), `compose.y*ml` (DOCKER_COMPOSE).
-   A project with no marker files is skipped, not guessed.
-5. **Service resolution.** A listening process becomes a node when any of: known dev process
-   name, known dev port, or a detected framework project at its cwd. Everything else is noise
-   and filtered.
-6. **Infra classification.** Processes matching known infra names/ports become DATABASE / CACHE /
-   MESSAGE_BROKER nodes named after the kind (`postgres`, `redis`, ...), independent of cwd.
-7. **Topology assembly.** Nodes sorted by type then name; `edges: []`; host metadata attached.
-   Port conflicts are detected (two processes claiming one configured port) but only rendered in
-   the summary count in v0.1 — the warning panel is a v0.2 surface.
-
-Docker containers are intentionally out of v0.1 (the concept doc puts Docker integration in
-v0.4); `CONTAINER` exists in the type so nodes can appear without a model change later.
-
-## CLI surface (v0.1)
-
-```text
-devtopology scan            # full report: services table + status summary
-devtopology ports           # port-centric table: PORT PID PROCESS SERVICE
-devtopology serve [--port]  # 127.0.0.1:4747, serves web/ build + GET /api/topology
-```
-
-- `scan` and `ports` accept `--json` for stable machine output (the seam for the later agent
-  integration; keep the shape identical to `Topology`).
-- Unknown options exit with code 2, like gitguard.
-- Output values that never appear: environment variable values, connection strings, tokens.
-  v0.1 never reads file contents, only file existence — there is nothing to leak yet, and the
-  redaction layer arrives with the v0.2 config parsers before any content is read.
-
-## Local API and web dashboard
-
-- `GET /api/topology` returns the current `Topology` as JSON, re-scanning on request (scans are
-  cheap: three subprocess calls; no daemon state to invalidate).
-- `GET /api/health` returns `{ ok: true }`.
-- The server binds `127.0.0.1` only, and serves the built `web/dist` statically.
-- The web app is Vite + React + React Flow. v0.1 renders **nodes only**, laid out in a typed
-  auto-layout (infra on the bottom row, services above, grouped by type). Each node card shows
-  name, type badge, port(s), status dot, framework, and branch.
-- The topology poll refetches every 5 seconds; there is no websocket in v0.1.
-- Bilingual from day one (EN/KO dictionary modules with a toggle), per the workspace localization
-  rule — the same pattern as `aws-cost-calculator`'s locale support, simplified for a local
-  dashboard (no routing, a `LanguageContext`).
-
-## Security and privacy
-
-- All analysis is local; nothing leaves the machine. No telemetry, no outbound requests from the
-  core.
-- The API binds to loopback only.
-- v0.1 reads no file contents. When v0.2 adds `.env`/`application.yml` parsing, values matching
-  secret-shaped keys are redacted at parse time, before they ever enter the topology model.
 
 ## Testing
 
-- Vitest, colocated `*.test.ts`.
-- Scanner parsers are pure functions tested against fixture files under
-  `src/platform/fixtures/` — recorded `ps` and `lsof` output from a real macOS session, plus
-  synthetic edge cases (empty listen table, pid with no cwd, IPv6 duplicates).
-- `frameworkDetector` tested against temporary directory trees.
-- Resolver and topology builder tested with synthetic `ProcessEntry`/listen-table inputs — no
-  subprocess spawning in unit tests.
-- `npm run check` = typecheck + build + test, mirroring the gitguard convention.
+- Rust: `cargo test` covers the filter/registry logic with synthetic process/socket inputs; the
+  sysinfo/netstat2 boundary is kept thin and unmocked.
+- Svelte: `vitest` + `@testing-library/svelte` render `ServiceCard`/`App` against fixture
+  snapshots (including empty and many-services cases).
+- `npm run tauri dev` for local verification; `npm run tauri build` for release bundles.
 
 ## Release policy
 
 - Conventional Commits; `main` is always buildable.
-- CI (GitHub Actions): build + test on every push/PR.
-- Releases are versioned tags (`vX.Y.Z`) that trigger the npm publish workflow (and later attach
-  platform notes). Regular pushes to `main` never publish.
+- CI (GitHub Actions): `cargo test` + frontend check on every push/PR; `tauri-action` builds
+  macOS (dmg) and Windows (msi/nsis) bundles only on `vX.Y.Z` tags. Pushes to `main` never ship.
+- Workspace git identity (`catchmeif404`) and the tag-triggered release policy apply as
+  everywhere else in this workspace.
 
-## Later phases (summary)
+## Roadmap
 
-- **v0.2 — Connections.** `.env` / `.env.local` / `application.yml` / `application.properties`
-  parsers, frontend→backend URL matching, `Evidence` attached to edges, confidence levels,
-  broken-connection and port-conflict warning panel in the web UI.
-- **v0.3 — Dependencies.** Backend→DB/Redis/Kafka edges, environment mismatch detection
-  (local process → remote/prod host warning), `dangerous_hosts` config.
-- **v0.4 — Docker.** `docker ps` + Compose file analysis; container nodes join the graph.
-- **v0.5 — Diagnostics.** `devtopology doctor` as a single exit-coded command combining all
-  diagnostics; `.devtopology.yml` project registration and manual annotations.
-- **v0.6 — Agent context.** `devtopology context` emitting a compact text summary for AI coding
-  agents; MCP server wrapper.
-- **v0.7 — Suite integration.** Shared surface with `gitguard` / Workbound (the "who is
-  committing / what can change / what is running" trio).
+- **v0.2 — Which project is this?** Map pid → working directory (mac: `proc_pidpath`/lsof cwd;
+  Windows: harder, best-effort) and show the repo folder/branch on each card. Menu-bar tray mode
+  with the live count.
+- **v0.3 — Connections.** Frontend→backend URL detection from `.env`/config files (the concept
+  document's §10–§12 pipeline), with evidence and confidence. Secret redaction lands here, at
+  parse time, before any value enters the model.
+- **v0.4 — Diagnostics.** Port conflicts, broken connections (frontend expects a port nobody
+  listens on), local→remote/prod host warnings.
+- **v0.5 — Agent context.** `get_services` JSON exposed as a CLI subcommand / MCP tool so AI
+  coding agents can read the local topology.
+- **v0.6 — Suite integration.** Shared surface with `gitguard` / Workbound ("what is running" /
+  "who is committing" / "what can change").
+
+The concept document's remaining ideas (request flow tracing, log viewing, process control) stay
+parked there until the widget proves itself.
