@@ -24,7 +24,11 @@ Rust 커맨드를 아래에 문서화한다.
         "name": "my-app",
         "path": "/Users/k/dev/my-app",
         "branch": "feature/login"
-      }
+      },
+      "connections": [
+        { "target": "postgres", "port": 5432, "local": true },
+        { "target": "203.0.113.10", "port": 443, "local": false }
+      ]
     },
     { "pid": 3332, "process": "postgres", "ports": [5432] }
   ],
@@ -38,6 +42,10 @@ Rust 커맨드를 아래에 문서화한다.
 - `services[].command`: 실행 명령줄 요약(최대 200자). 읽지 못하면 필드 생략.
 - `services[].project`: cwd에서 도출. cwd가 git 저장소면 저장소 루트의 폴더명과 브랜치,
   아니면 cwd 폴더명(브랜치 없음). cwd를 못 읽으면 필드 생략.
+- `services[].connections`: 관찰된 established TCP outbound 연결. loopback 주소가 표시된
+  서비스의 리슨 포트로 향하면 `local: true`와 대상 프로세스명을 표시하고, 그 외에는
+  원격 IP와 포트를 표시한다. 연결은 프로세스 카드별로 중복 제거된다. `.env`나 설정 파일은
+  읽지 않는다.
 - `generatedAt`: Unix epoch 밀리초.
 - `host.os`: `macos` | `windows` | `linux` (`std::env::consts::OS`).
 
@@ -67,3 +75,4 @@ Rust 커맨드를 아래에 문서화한다.
 - v0.1 (2026-09-10): `get_services` 최초 정의.
 - v0.1.1 (2026-09-10): `get_services` 응답에 `command`, `project` 추가.
 - v0.1.2 (2026-09-10): `stop_service` 최초 정의.
+- v0.1.3 (2026-09-10): `get_services` 응답에 관찰된 TCP 연결을 추가.

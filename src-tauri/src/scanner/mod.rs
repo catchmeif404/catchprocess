@@ -9,15 +9,11 @@ pub mod stop;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use netstat2::{
-    AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState, get_sockets_info,
-};
+use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState};
 use serde::Serialize;
-use sysinfo::{
-    Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind,
-};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-use filter::{Connection, ListenRow, ProcessRow, Service};
+use filter::{ConnectionRow, ListenRow, ProcessRow, Service};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,51 +67,28 @@ fn collect_listeners(sockets: &[netstat2::SocketInfo]) -> Vec<ListenRow> {
         .collect()
 }
 
-/// Attach outbound established sockets to displayed services. Server-side sockets are skipped:
-/// their local port is already one of the service's listeners, and their remote port is usually
-/// only an ephemeral client port.
+/// Convert established OS sockets to the small, pure mapping input used by `filter`.
 fn collect_connections(
     sockets: &[netstat2::SocketInfo],
     processes: &[ProcessRow],
     listeners: &[ListenRow],
     services: &mut [Service],
 ) {
-    let names: std::collections::HashMap<u32, &str> =
-        processes.iter().map(|process| (process.pid, process.name.as_str())).collect();
-    let local_targets: std::collections::HashMap<u16, String> = listeners
+    let rows: Vec<ConnectionRow> = sockets
         .iter()
-        .filter_map(|listener| {
-            listener
-                .pid
-                .and_then(|pid| names.get(&pid).map(|name| (listener.port, (*name).to_string())))
+        .filter_map(|socket| match &socket.protocol_socket_info {
+            ProtocolSocketInfo::Tcp(tcp) if tcp.state == TcpState::Established => {
+                Some(ConnectionRow {
+                    pids: socket.associated_pids.clone(),
+                    local_port: tcp.local_port,
+                    remote_addr: tcp.remote_addr,
+                    remote_port: tcp.remote_port,
+                })
+            }
+            _ => None,
         })
         .collect();
-
-    for socket in sockets {
-        let ProtocolSocketInfo::Tcp(tcp) = &socket.protocol_socket_info else { continue };
-        if tcp.state != TcpState::Established { continue; }
-        let local = local_targets.contains_key(&tcp.remote_port);
-        let target = local_targets
-            .get(&tcp.remote_port)
-            .cloned()
-            .unwrap_or_else(|| tcp.remote_addr.to_string());
-
-        for pid in &socket.associated_pids {
-            let Some(service) = services.iter_mut().find(|service| service.pid == *pid) else {
-                continue;
-            };
-            if service.ports.contains(&tcp.local_port) { continue; }
-            if !service.connections.iter().any(|connection| {
-                connection.target == target && connection.port == tcp.remote_port
-            }) {
-                service.connections.push(Connection {
-                    target: target.clone(),
-                    port: tcp.remote_port,
-                    local,
-                });
-            }
-        }
-    }
+    filter::attach_connections(processes, listeners, &rows, services);
 }
 
 /// 명령줄 배열을 카드용 한 줄 문자열로 합친다. 과도한 JSON을 막기 위해 200자로 제한.
@@ -157,7 +130,8 @@ pub fn scan() -> Snapshot {
     let processes = process_rows(&system);
     let sockets = collect_tcp_sockets();
     let listeners = collect_listeners(&sockets);
-    let mut services = filter::filter_services(&processes, &listeners, registry::INCLUDE_ALL_LISTENERS);
+    let mut services =
+        filter::filter_services(&processes, &listeners, registry::INCLUDE_ALL_LISTENERS);
 
     // 2단계: 필터를 통과한 서비스 pid에 대해서만 cwd/명령줄을 추가로 읽는다.
     // 전체 프로세스에 대해 cwd(proc_pidinfo)를 읽으면 스캔이 불필요하게 무거워진다.
@@ -184,10 +158,9 @@ pub fn scan() -> Snapshot {
     // infrastructure rather than services owned by a project. Hide them after cwd enrichment
     // so ordinary Java application servers remain visible.
     services.retain(|service| {
-        !service
-            .project
-            .as_ref()
-            .is_some_and(|project| project::is_gradle_daemon_path(std::path::Path::new(&project.path)))
+        !service.project.as_ref().is_some_and(|project| {
+            project::is_gradle_daemon_path(std::path::Path::new(&project.path))
+        })
     });
     collect_connections(&sockets, &processes, &listeners, &mut services);
 

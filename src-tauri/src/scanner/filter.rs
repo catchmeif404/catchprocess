@@ -3,6 +3,8 @@
 //! No OS access happens here: the scanner collects [`ProcessRow`] / [`ListenRow`] inputs at the
 //! edge (sysinfo / netstat2) and this module decides what becomes a widget card.
 
+use std::net::IpAddr;
+
 use serde::{Deserialize, Serialize};
 
 use super::project::ProjectInfo;
@@ -22,6 +24,18 @@ pub struct ListenRow {
     pub port: u16,
     /// Owning pid; `None` when the OS does not attribute the socket to a process.
     pub pid: Option<u32>,
+}
+
+/// One established TCP connection collected from the OS socket table.
+///
+/// The scanner converts `netstat2` rows to this small, testable shape before applying the
+/// mapping rules below. A row may be associated with more than one pid on some platforms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionRow {
+    pub pids: Vec<u32>,
+    pub local_port: u16,
+    pub remote_addr: IpAddr,
+    pub remote_port: u16,
 }
 
 /// A service card in the widget.
@@ -82,9 +96,7 @@ pub fn filter_services(
     for row in listeners {
         let Some(pid) = row.pid else { continue };
         let known = include_all || is_known_port(row.port) || {
-            names
-                .get(&pid)
-                .is_some_and(|name| is_known_process(name))
+            names.get(&pid).is_some_and(|name| is_known_process(name))
         };
         if known {
             let ports = by_pid.entry(pid).or_default();
@@ -116,6 +128,66 @@ pub fn filter_services(
     services
 }
 
+/// Attach observed outbound connections to the displayed services.
+///
+/// A connection is considered local only when its remote address is loopback and its remote port
+/// belongs to a displayed listener. Port equality alone is not enough: an external endpoint can
+/// use the same port number as a local service. Server-side sockets are skipped when their local
+/// port is already one of the service's listeners.
+pub fn attach_connections(
+    processes: &[ProcessRow],
+    listeners: &[ListenRow],
+    rows: &[ConnectionRow],
+    services: &mut [Service],
+) {
+    let names: std::collections::HashMap<u32, &str> = processes
+        .iter()
+        .map(|process| (process.pid, process.name.as_str()))
+        .collect();
+    let local_targets: std::collections::HashMap<u16, String> = listeners
+        .iter()
+        .filter_map(|listener| {
+            listener.pid.and_then(|pid| {
+                names
+                    .get(&pid)
+                    .map(|name| (listener.port, (*name).to_string()))
+            })
+        })
+        .collect();
+
+    for row in rows {
+        let local = row.remote_addr.is_loopback() && local_targets.contains_key(&row.remote_port);
+        let target = if local {
+            local_targets
+                .get(&row.remote_port)
+                .cloned()
+                .expect("local target was checked above")
+        } else {
+            row.remote_addr.to_string()
+        };
+
+        for pid in &row.pids {
+            let Some(service) = services.iter_mut().find(|service| service.pid == *pid) else {
+                continue;
+            };
+            if service.ports.contains(&row.local_port) {
+                continue;
+            }
+            if !service
+                .connections
+                .iter()
+                .any(|connection| connection.target == target && connection.port == row.remote_port)
+            {
+                service.connections.push(Connection {
+                    target: target.clone(),
+                    port: row.remote_port,
+                    local,
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +201,20 @@ mod tests {
 
     fn listen(port: u16, pid: Option<u32>) -> ListenRow {
         ListenRow { port, pid }
+    }
+
+    fn connection(
+        pids: &[u32],
+        local_port: u16,
+        remote_addr: &str,
+        remote_port: u16,
+    ) -> ConnectionRow {
+        ConnectionRow {
+            pids: pids.to_vec(),
+            local_port,
+            remote_addr: remote_addr.parse().expect("valid test IP"),
+            remote_port,
+        }
     }
 
     #[test]
@@ -157,11 +243,7 @@ mod tests {
 
     #[test]
     fn unknown_process_on_unknown_port_is_dropped() {
-        let services = filter_services(
-            &[proc(3, "dropbox")],
-            &[listen(17500, Some(3))],
-            false,
-        );
+        let services = filter_services(&[proc(3, "dropbox")], &[listen(17500, Some(3))], false);
         assert!(services.is_empty());
     }
 
@@ -173,11 +255,7 @@ mod tests {
 
     #[test]
     fn include_all_widens_filter() {
-        let services = filter_services(
-            &[proc(3, "dropbox")],
-            &[listen(17500, Some(3))],
-            true,
-        );
+        let services = filter_services(&[proc(3, "dropbox")], &[listen(17500, Some(3))], true);
         assert_eq!(services.len(), 1);
     }
 
@@ -211,12 +289,108 @@ mod tests {
     #[test]
     fn windows_exe_suffix_is_ignored_for_matching() {
         // Unknown port, so inclusion can only come from the (suffix-stripped) name match.
-        let services = filter_services(
-            &[proc(1, "NODE.EXE")],
-            &[listen(9999, Some(1))],
-            false,
-        );
+        let services = filter_services(&[proc(1, "NODE.EXE")], &[listen(9999, Some(1))], false);
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].process, "NODE.EXE");
+    }
+
+    #[test]
+    fn loopback_connection_maps_to_local_listener_process() {
+        let processes = [proc(1, "node"), proc(2, "postgres")];
+        let listeners = [listen(5173, Some(1)), listen(5432, Some(2))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[connection(&[1], 41000, "127.0.0.1", 5432)],
+            &mut services,
+        );
+
+        assert_eq!(
+            services[0].connections,
+            vec![Connection {
+                target: "postgres".to_string(),
+                port: 5432,
+                local: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn external_endpoint_with_local_port_number_stays_external() {
+        let processes = [proc(1, "node"), proc(2, "postgres")];
+        let listeners = [listen(5173, Some(1)), listen(5432, Some(2))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[connection(&[1], 41000, "203.0.113.10", 5432)],
+            &mut services,
+        );
+
+        assert_eq!(
+            services[0].connections,
+            vec![Connection {
+                target: "203.0.113.10".to_string(),
+                port: 5432,
+                local: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn ipv6_loopback_also_maps_to_local_listener() {
+        let processes = [proc(1, "node"), proc(2, "redis-server")];
+        let listeners = [listen(5173, Some(1)), listen(6379, Some(2))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[connection(&[1], 41000, "::1", 6379)],
+            &mut services,
+        );
+
+        assert_eq!(services[0].connections[0].target, "redis-server");
+        assert!(services[0].connections[0].local);
+    }
+
+    #[test]
+    fn duplicate_connections_are_collapsed_and_server_socket_is_skipped() {
+        let processes = [proc(1, "node"), proc(2, "postgres")];
+        let listeners = [listen(5173, Some(1)), listen(5432, Some(2))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[
+                connection(&[1], 41000, "127.0.0.1", 5432),
+                connection(&[1], 41000, "127.0.0.1", 5432),
+                connection(&[2], 5432, "127.0.0.1", 41000),
+            ],
+            &mut services,
+        );
+
+        assert_eq!(services[0].connections.len(), 1);
+        assert!(services[1].connections.is_empty());
+    }
+
+    #[test]
+    fn unknown_process_ids_are_ignored() {
+        let processes = [proc(1, "node")];
+        let listeners = [listen(5173, Some(1))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[connection(&[999], 41000, "127.0.0.1", 5432)],
+            &mut services,
+        );
+
+        assert!(services[0].connections.is_empty());
     }
 }

@@ -31,7 +31,7 @@ subcommand of the same core.
 |---|---|---|
 | Widget shell | Tauri 2 | frameless, transparent, always-on-top window |
 | UI | Svelte 5 + TypeScript | Vite build; follow the workspace Svelte coding rules |
-| Scanner | Rust | `sysinfo` (process list) + `netstat2` (listen sockets, port↔pid) |
+| Scanner | Rust | `sysinfo` (process list) + `netstat2` (listen/established sockets, port↔pid) |
 | Serialization | `serde` / `serde_json` | one shared JSON shape across the IPC boundary |
 | Window state | `tauri-plugin-window-state` | remembers widget position/size across launches |
 
@@ -61,6 +61,10 @@ the win target). Users install prebuilt bundles; they need nothing else.
 - The UI polls `get_services` every 3 seconds (Tauri `invoke`). No events, no daemon, no
   background threads beyond the scan itself; a scan is a single `sysinfo` refresh + socket table
   read.
+- Established TCP rows are reduced to outbound connections on displayed service cards. A
+  loopback connection to a displayed listener is mapped to that listener's process; other
+  endpoints are shown as remote IP and port. The mapping is pure and unit-tested with synthetic
+  rows, while `netstat2` remains a thin OS boundary.
 - No network egress, no file contents are read, nothing leaves the machine.
 
 ## Data model
@@ -72,6 +76,13 @@ interface Service {
   pid: number;
   process: string;      // "node", "java", "postgres", ...
   ports: number[];      // all TCP ports this pid is listening on
+  connections?: Connection[];
+}
+
+interface Connection {
+  target: string;        // local process name or remote IP
+  port: number;
+  local: boolean;
 }
 
 interface Snapshot {
@@ -172,9 +183,10 @@ devtopology/
 - **v0.2 — Which project is this?** Map pid → working directory (mac: `proc_pidpath`/lsof cwd;
   Windows: harder, best-effort) and show the repo folder/branch on each card. Menu-bar tray mode
   with the live count.
-- **v0.3 — Connections.** Frontend→backend URL detection from `.env`/config files (the concept
-  document's §10–§12 pipeline), with evidence and confidence. Secret redaction lands here, at
-  parse time, before any value enters the model.
+- **v0.3 — Connections.** Improve the observed TCP first slice with evidence/confidence and
+  optional, redacted frontend→backend URL discovery from `.env`/config files (the concept
+  document's §10–§12 pipeline). Secret redaction lands here, at parse time, before any value
+  enters the model.
 - **v0.4 — Diagnostics.** Port conflicts, broken connections (frontend expects a port nobody
   listens on), local→remote/prod host warnings.
 - **v0.5 — Agent context.** `get_services` JSON exposed as a CLI subcommand / MCP tool so AI
