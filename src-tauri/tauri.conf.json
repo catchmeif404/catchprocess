@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DevTopology",
+  "version": "0.1.0",
+  "identifier": "com.catchmeif404.devtopology",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "DevTopology",
+        "width": 280,
+        "height": 360,
+        "minWidth": 220,
+        "minHeight": 140,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "shadow": false,
+        "acceptFirstMouse": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

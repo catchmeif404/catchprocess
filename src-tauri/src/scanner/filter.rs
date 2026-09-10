@@ -1,0 +1,199 @@
+//! Pure dev-relevance filtering over process and listening-socket rows.
+//!
+//! No OS access happens here: the scanner collects [`ProcessRow`] / [`ListenRow`] inputs at the
+//! edge (sysinfo / netstat2) and this module decides what becomes a widget card.
+
+use serde::{Deserialize, Serialize};
+
+use super::registry::{KNOWN_DEV_PORTS, KNOWN_PROCESS_NAMES};
+
+/// One process from the OS process table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessRow {
+    pub pid: u32,
+    /// Lowercased executable name, `.exe` suffix stripped (Windows).
+    pub name: String,
+}
+
+/// One TCP listen socket from the OS socket table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListenRow {
+    pub port: u16,
+    /// Owning pid; `None` when the OS does not attribute the socket to a process.
+    pub pid: Option<u32>,
+}
+
+/// A service card in the widget.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Service {
+    pub pid: u32,
+    pub process: String,
+    /// All listening ports of this pid, deduplicated and sorted ascending.
+    pub ports: Vec<u16>,
+}
+
+fn is_known_process(name: &str) -> bool {
+    // Defense in depth: compare lowercased with a Windows `.exe` suffix stripped, even though
+    // the scanner is expected to normalize the row name when building it.
+    let lowered = name.to_lowercase();
+    let bare = lowered.strip_suffix(".exe").unwrap_or(&lowered);
+    KNOWN_PROCESS_NAMES.contains(&bare)
+}
+
+fn is_known_port(port: u16) -> bool {
+    KNOWN_DEV_PORTS.contains(&port)
+}
+
+/// Reduce process and socket rows into the deduplicated, port-sorted service list.
+///
+/// A pid becomes a service when `include_all` is set, or its name is known, or it listens on a
+/// known dev port. Listeners without an owning pid are dropped (the card has nothing to show).
+pub fn filter_services(
+    processes: &[ProcessRow],
+    listeners: &[ListenRow],
+    include_all: bool,
+) -> Vec<Service> {
+    let names: std::collections::HashMap<u32, &str> =
+        processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
+
+    // pid -> ports, preserving first-seen order before the final sort.
+    let mut by_pid: std::collections::BTreeMap<u32, Vec<u16>> = std::collections::BTreeMap::new();
+    for row in listeners {
+        let Some(pid) = row.pid else { continue };
+        let known = include_all || is_known_port(row.port) || {
+            names
+                .get(&pid)
+                .is_some_and(|name| is_known_process(name))
+        };
+        if known {
+            let ports = by_pid.entry(pid).or_default();
+            if !ports.contains(&row.port) {
+                ports.push(row.port);
+            }
+        }
+    }
+
+    let mut services: Vec<Service> = by_pid
+        .into_iter()
+        .map(|(pid, mut ports)| {
+            ports.sort_unstable();
+            let name = names
+                .get(&pid)
+                .map(|n| (*n).to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            Service {
+                pid,
+                process: name,
+                ports,
+            }
+        })
+        .collect();
+    services.sort_by(|a, b| a.ports[0].cmp(&b.ports[0]).then(a.pid.cmp(&b.pid)));
+    services
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proc(pid: u32, name: &str) -> ProcessRow {
+        ProcessRow {
+            pid,
+            name: name.to_string(),
+        }
+    }
+
+    fn listen(port: u16, pid: Option<u32>) -> ListenRow {
+        ListenRow { port, pid }
+    }
+
+    #[test]
+    fn known_process_name_is_included() {
+        let services = filter_services(
+            &[proc(1, "node"), proc(2, "chrome")],
+            &[listen(5173, Some(1)), listen(9001, Some(2))],
+            false,
+        );
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].process, "node");
+        assert_eq!(services[0].ports, vec![5173]);
+    }
+
+    #[test]
+    fn unknown_process_on_known_port_is_included() {
+        let services = filter_services(
+            &[proc(7, "some-custom-server")],
+            &[listen(8080, Some(7))],
+            false,
+        );
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].pid, 7);
+        assert_eq!(services[0].ports, vec![8080]);
+    }
+
+    #[test]
+    fn unknown_process_on_unknown_port_is_dropped() {
+        let services = filter_services(
+            &[proc(3, "dropbox")],
+            &[listen(17500, Some(3))],
+            false,
+        );
+        assert!(services.is_empty());
+    }
+
+    #[test]
+    fn unattributed_listener_is_dropped() {
+        let services = filter_services(&[proc(1, "node")], &[listen(6379, None)], false);
+        assert!(services.is_empty());
+    }
+
+    #[test]
+    fn include_all_widens_filter() {
+        let services = filter_services(
+            &[proc(3, "dropbox")],
+            &[listen(17500, Some(3))],
+            true,
+        );
+        assert_eq!(services.len(), 1);
+    }
+
+    #[test]
+    fn ports_are_deduplicated_and_sorted_across_families() {
+        // IPv4 + IPv6 duplicates of the same port, plus an extra port.
+        let services = filter_services(
+            &[proc(9, "postgres")],
+            &[
+                listen(5432, Some(9)),
+                listen(5432, Some(9)),
+                listen(5433, Some(9)),
+            ],
+            false,
+        );
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].ports, vec![5432, 5433]);
+    }
+
+    #[test]
+    fn services_are_sorted_by_lowest_port() {
+        let services = filter_services(
+            &[proc(1, "java"), proc(2, "node")],
+            &[listen(8080, Some(1)), listen(3000, Some(2))],
+            false,
+        );
+        assert_eq!(services[0].pid, 2, "port 3000 must come before 8080");
+        assert_eq!(services[1].pid, 1);
+    }
+
+    #[test]
+    fn windows_exe_suffix_is_ignored_for_matching() {
+        // Unknown port, so inclusion can only come from the (suffix-stripped) name match.
+        let services = filter_services(
+            &[proc(1, "NODE.EXE")],
+            &[listen(9999, Some(1))],
+            false,
+        );
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].process, "NODE.EXE");
+    }
+}
