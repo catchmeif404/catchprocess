@@ -118,8 +118,11 @@ input — the sysinfo/netstat2 calls stay at the edge.
 - Empty state: "no dev services detected" (both locales).
 - UI strings come from one `i18n.ts` module with `en`/`ko` maps — bilingual from day one per the
   workspace rule; the widget surface is small enough that this is one file, not a framework.
-- Styling targets the case-file identity later; v0.1 keeps a neutral dark translucent card
-  look. No graph library, no router, no state library — Svelte runes and one polling `setInterval`.
+- Styling follows the catchmeif404 case-file identity, using the exact tokens from `site/`
+  (paper `#f1e9d2`, ink `#241f1a`, stamp red `#a32b2b`, Courier font stack — no webfonts, so
+  the widget stays offline). Cards render as paper exhibits with a tape tab and a slight
+  alternating tilt; there is no outer container box. No graph library, no router, no state
+  library — Svelte runes and one polling `setInterval`.
 
 ## Repository layout
 
