@@ -37,6 +37,7 @@
       ports: service.ports.join(', '),
     }),
   );
+  const connections = $derived(service.connections ?? []);
 
   function handleStopClick(): void {
     if (stopping) return;
@@ -75,6 +76,14 @@
   <div class="meta">
     <span>{metaParts.join(' · ')}</span>
   </div>
+  {#if connections.length > 0}
+    <div class="connections">
+      <span class="connection-label">{t('connections')}</span>
+      {#each connections as connection}
+        <span class="connection">{t('connectedTo', { target: connection.target, port: connection.port })}</span>
+      {/each}
+    </div>
+  {/if}
 </li>
 
 <style>
@@ -163,5 +172,20 @@
     padding-left: 1.15rem;
     color: var(--ink-muted);
     font-size: 0.68rem;
+  }
+
+  .connections {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.45rem;
+    padding-left: 1.15rem;
+    color: var(--ink-muted);
+    font-size: 0.64rem;
+  }
+
+  .connection-label {
+    color: var(--stamp);
+    font-weight: 700;
+    text-transform: uppercase;
   }
 </style>

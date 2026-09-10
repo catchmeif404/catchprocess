@@ -17,7 +17,7 @@ use sysinfo::{
     Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind,
 };
 
-use filter::{ListenRow, ProcessRow, Service};
+use filter::{Connection, ListenRow, ProcessRow, Service};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,17 +51,16 @@ fn process_rows(system: &System) -> Vec<ProcessRow> {
         .collect()
 }
 
-fn collect_listeners() -> Vec<ListenRow> {
+fn collect_tcp_sockets() -> Vec<netstat2::SocketInfo> {
     let families = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
     let protocols = ProtocolFlags::TCP;
-    let sockets = match get_sockets_info(families, protocols) {
-        Ok(sockets) => sockets,
-        // A failed socket-table read degrades to an empty list, not a widget error.
-        Err(_) => return Vec::new(),
-    };
+    get_sockets_info(families, protocols).unwrap_or_default()
+}
+
+fn collect_listeners(sockets: &[netstat2::SocketInfo]) -> Vec<ListenRow> {
     sockets
-        .into_iter()
-        .filter_map(|socket| match socket.protocol_socket_info {
+        .iter()
+        .filter_map(|socket| match &socket.protocol_socket_info {
             // v0.1은 TCP 리슨 소켓만 관심 대상 (UDP는 서비스 탐지에 노이즈만 추가).
             ProtocolSocketInfo::Tcp(tcp) if tcp.state == TcpState::Listen => Some(ListenRow {
                 port: tcp.local_port,
@@ -70,6 +69,53 @@ fn collect_listeners() -> Vec<ListenRow> {
             _ => None,
         })
         .collect()
+}
+
+/// Attach outbound established sockets to displayed services. Server-side sockets are skipped:
+/// their local port is already one of the service's listeners, and their remote port is usually
+/// only an ephemeral client port.
+fn collect_connections(
+    sockets: &[netstat2::SocketInfo],
+    processes: &[ProcessRow],
+    listeners: &[ListenRow],
+    services: &mut [Service],
+) {
+    let names: std::collections::HashMap<u32, &str> =
+        processes.iter().map(|process| (process.pid, process.name.as_str())).collect();
+    let local_targets: std::collections::HashMap<u16, String> = listeners
+        .iter()
+        .filter_map(|listener| {
+            listener
+                .pid
+                .and_then(|pid| names.get(&pid).map(|name| (listener.port, (*name).to_string())))
+        })
+        .collect();
+
+    for socket in sockets {
+        let ProtocolSocketInfo::Tcp(tcp) = &socket.protocol_socket_info else { continue };
+        if tcp.state != TcpState::Established { continue; }
+        let local = local_targets.contains_key(&tcp.remote_port);
+        let target = local_targets
+            .get(&tcp.remote_port)
+            .cloned()
+            .unwrap_or_else(|| tcp.remote_addr.to_string());
+
+        for pid in &socket.associated_pids {
+            let Some(service) = services.iter_mut().find(|service| service.pid == *pid) else {
+                continue;
+            };
+            if service.ports.contains(&tcp.local_port) { continue; }
+            if !service.connections.iter().any(|connection| {
+                connection.target == target && connection.port == tcp.remote_port
+            }) {
+                service.connections.push(Connection {
+                    target: target.clone(),
+                    port: tcp.remote_port,
+                    local,
+                });
+            }
+        }
+    }
 }
 
 /// 명령줄 배열을 카드용 한 줄 문자열로 합친다. 과도한 JSON을 막기 위해 200자로 제한.
@@ -109,7 +155,8 @@ pub fn scan() -> Snapshot {
     // cwd/cmd를 읽지 않는다(ProcessRefreshKind 기본값이 전부 never라 sysinfo가 의도한 것).
     system.refresh_processes(ProcessesToUpdate::All, true);
     let processes = process_rows(&system);
-    let listeners = collect_listeners();
+    let sockets = collect_tcp_sockets();
+    let listeners = collect_listeners(&sockets);
     let mut services = filter::filter_services(&processes, &listeners, registry::INCLUDE_ALL_LISTENERS);
 
     // 2단계: 필터를 통과한 서비스 pid에 대해서만 cwd/명령줄을 추가로 읽는다.
@@ -142,6 +189,7 @@ pub fn scan() -> Snapshot {
             .as_ref()
             .is_some_and(|project| project::is_gradle_daemon_path(std::path::Path::new(&project.path)))
     });
+    collect_connections(&sockets, &processes, &listeners, &mut services);
 
     Snapshot {
         services,

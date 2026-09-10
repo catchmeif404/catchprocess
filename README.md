@@ -32,6 +32,8 @@ question: **what is running right now?**
   프로세스 작업 경로에서 Git 저장소명과 브랜치를 자동으로 표시
 - Search services by process or project name /
   프로세스명·프로젝트명으로 서비스 검색
+- Connection mapping: show observed outbound TCP edges to local listeners or remote endpoints /
+  로컬 리스너 또는 외부 엔드포인트로 향하는 outbound TCP 연결을 표시
 - Stop a running service from its card (SIGTERM, then SIGKILL after a short grace period) /
   카드에서 실행 중인 서비스 중지 (SIGTERM 후 짧은 유예 뒤 SIGKILL)
 - Frameless, translucent, always-on-top; drag anywhere; position is remembered /
@@ -63,6 +65,9 @@ defined in one place, `src-tauri/src/scanner/registry.rs`. For matching services
 the working directory and command line needed for card context. Git metadata is used to derive
 the repository name and branch; package-manager checkouts such as Homebrew and build daemons
 such as Gradle are excluded from project detection.
+Established outbound TCP sockets are mapped to known local listeners when possible; otherwise
+the remote IP address and port are shown. This is live socket evidence, not configuration
+analysis, so an idle or short-lived request may not appear.
 
 Svelte 위젯은 단일 Tauri 커맨드 `get_services`를 3초마다 호출한다. Rust 쪽은 OS 프로세스
 테이블(`sysinfo`)과 TCP 소켓 테이블(`netstat2`)을 읽어 리슨 포트를 pid별로 묶고, 알려진 개발
@@ -70,6 +75,9 @@ Svelte 위젯은 단일 Tauri 커맨드 `get_services`를 3초마다 호출한�
 정의된다. 매칭된 서비스에 한해 카드에 필요한 작업 경로와 명령줄만 추가로 읽는다. Git
 메타데이터로 저장소명과 브랜치를 도출하며, Homebrew 같은 패키지 관리자 checkout과 Gradle
 daemon 같은 빌드 보조 프로세스는 프로젝트 감지에서 제외한다.
+확립된 outbound TCP 소켓은 가능한 경우 알려진 로컬 리스너와 연결해 표시하고, 그렇지 않으면
+원격 IP 주소와 포트를 표시한다. 이는 설정 분석이 아니라 현재 소켓 상태에 대한 관찰이므로
+유휴 상태이거나 짧게 끝난 요청은 나타나지 않을 수 있다.
 
 ## Privacy / 프라이버시
 

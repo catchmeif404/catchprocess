@@ -39,6 +39,18 @@ pub struct Service {
     /// omitted when the cwd could not be read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectInfo>,
+    /// Outbound TCP connections observed for this process.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<Connection>,
+}
+
+/// A connection from a displayed service to a local listener or external endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Connection {
+    pub target: String,
+    pub port: u16,
+    pub local: bool,
 }
 
 fn is_known_process(name: &str) -> bool {
@@ -96,6 +108,7 @@ pub fn filter_services(
                 ports,
                 command: String::new(),
                 project: None,
+                connections: Vec::new(),
             }
         })
         .collect();

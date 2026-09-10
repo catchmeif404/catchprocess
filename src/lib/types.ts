@@ -22,6 +22,14 @@ export interface Service {
   command?: string;
   /** cwd 기반 프로젝트 정보. cwd를 못 읽으면 필드 자체가 없다. */
   project?: ProjectInfo;
+  /** 현재 관찰된 outbound TCP 연결. */
+  connections?: Connection[];
+}
+
+export interface Connection {
+  target: string;
+  port: number;
+  local: boolean;
 }
 
 export interface HostInfo {
