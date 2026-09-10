@@ -12,7 +12,9 @@ use netstat2::{
     AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState, get_sockets_info,
 };
 use serde::Serialize;
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use sysinfo::{
+    Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind,
+};
 
 use filter::{ListenRow, ProcessRow, Service};
 
@@ -102,10 +104,25 @@ fn epoch_millis() -> u64 {
 /// Take one full snapshot of the dev-relevant local topology.
 pub fn scan() -> Snapshot {
     let mut system = System::new();
+    // 1단계: 전체 프로세스 테이블(이름) — dev 관련성 필터링용. 기본 리프레시는
+    // cwd/cmd를 읽지 않는다(ProcessRefreshKind 기본값이 전부 never라 sysinfo가 의도한 것).
     system.refresh_processes(ProcessesToUpdate::All, true);
     let processes = process_rows(&system);
     let listeners = collect_listeners();
     let mut services = filter::filter_services(&processes, &listeners, registry::INCLUDE_ALL_LISTENERS);
+
+    // 2단계: 필터를 통과한 서비스 pid에 대해서만 cwd/명령줄을 추가로 읽는다.
+    // 전체 프로세스에 대해 cwd(proc_pidinfo)를 읽으면 스캔이 불필요하게 무거워진다.
+    let service_pids: Vec<Pid> = services.iter().map(|s| Pid::from_u32(s.pid)).collect();
+    if !service_pids.is_empty() {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&service_pids),
+            true,
+            ProcessRefreshKind::nothing()
+                .with_cwd(UpdateKind::Always)
+                .with_cmd(UpdateKind::Always),
+        );
+    }
 
     // 카드 보강: 명령줄 + cwd 기반 프로젝트 정보. cwd 읽기 실패는 그 필드만 생략된다.
     for service in &mut services {
