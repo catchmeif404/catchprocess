@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::project::ProjectInfo;
 use super::registry::{KNOWN_DEV_PORTS, KNOWN_PROCESS_NAMES};
 
 /// One process from the OS process table.
@@ -31,6 +32,13 @@ pub struct Service {
     pub process: String,
     /// All listening ports of this pid, deduplicated and sorted ascending.
     pub ports: Vec<u16>,
+    /// Full command line, capped at 200 chars; omitted when unavailable.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub command: String,
+    /// Project derived from the process cwd (git repo name/branch or folder name);
+    /// omitted when the cwd could not be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectInfo>,
 }
 
 fn is_known_process(name: &str) -> bool {
@@ -86,6 +94,8 @@ pub fn filter_services(
                 pid,
                 process: name,
                 ports,
+                command: String::new(),
+                project: None,
             }
         })
         .collect();

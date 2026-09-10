@@ -1,7 +1,9 @@
 //! Collects live process and listening-socket data from the OS and reduces it to the widget
-//! snapshot. All OS access lives in this module (sysinfo + netstat2); filtering is in `filter`.
+//! snapshot. All OS access lives in this module (sysinfo + netstat2); filtering is in `filter`
+//! and project derivation in `project`.
 
 pub mod filter;
+pub mod project;
 pub mod registry;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,7 +12,7 @@ use netstat2::{
     AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState, get_sockets_info,
 };
 use serde::Serialize;
-use sysinfo::{ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use filter::{ListenRow, ProcessRow, Service};
 
@@ -31,9 +33,7 @@ pub struct Snapshot {
     pub host: HostInfo,
 }
 
-fn collect_processes() -> Vec<ProcessRow> {
-    let mut system = System::new();
-    system.refresh_processes(ProcessesToUpdate::All, true);
+fn process_rows(system: &System) -> Vec<ProcessRow> {
     system
         .processes()
         .iter()
@@ -69,6 +69,21 @@ fn collect_listeners() -> Vec<ListenRow> {
         .collect()
 }
 
+/// 명령줄 배열을 카드용 한 줄 문자열로 합친다. 과도한 JSON을 막기 위해 200자로 제한.
+fn summarize_command(args: &[std::ffi::OsString]) -> String {
+    let joined = args
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if joined.chars().count() > 200 {
+        let truncated: String = joined.chars().take(200).collect();
+        format!("{truncated}…")
+    } else {
+        joined
+    }
+}
+
 fn host_info() -> HostInfo {
     HostInfo {
         os: std::env::consts::OS,
@@ -86,15 +101,58 @@ fn epoch_millis() -> u64 {
 
 /// Take one full snapshot of the dev-relevant local topology.
 pub fn scan() -> Snapshot {
-    let processes = collect_processes();
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    let processes = process_rows(&system);
     let listeners = collect_listeners();
+    let mut services = filter::filter_services(&processes, &listeners, registry::INCLUDE_ALL_LISTENERS);
+
+    // 카드 보강: 명령줄 + cwd 기반 프로젝트 정보. cwd 읽기 실패는 그 필드만 생략된다.
+    for service in &mut services {
+        if let Some(process) = system.process(Pid::from_u32(service.pid)) {
+            service.command = summarize_command(process.cmd());
+            service.project = project::resolve(process.cwd());
+        }
+    }
+
     Snapshot {
-        services: filter::filter_services(
-            &processes,
-            &listeners,
-            registry::INCLUDE_ALL_LISTENERS,
-        ),
+        services,
         generated_at: epoch_millis(),
         host: host_info(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_command;
+
+    #[test]
+    fn summarize_command_joins_args() {
+        assert_eq!(
+            summarize_command(&["node".into(), "vite".into(), "--port".into(), "5173".into()]),
+            "node vite --port 5173"
+        );
+    }
+
+    #[test]
+    fn summarize_command_truncates_long_lines() {
+        let long = "a".repeat(500);
+        let summarized = summarize_command(&[long.clone().into()]);
+        assert_eq!(summarized.chars().count(), 201); // 200자 + 생략 기호
+        assert!(summarized.ends_with('…'));
+        assert_ne!(summarized, long);
+    }
+
+    #[test]
+    fn summarize_command_handles_empty() {
+        assert_eq!(summarize_command(&[]), "");
+    }
+
+    #[test]
+    fn summarize_command_keeps_multibyte_chars_intact() {
+        // 200자 제한이 유니코드를 중간에 자르지 않는지 확인.
+        let hangul = "가".repeat(250);
+        let summarized = summarize_command(&[hangul.into()]);
+        assert_eq!(summarized.chars().count(), 201);
     }
 }

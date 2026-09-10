@@ -15,8 +15,17 @@ Rust 커맨드를 아래에 문서화한다.
 ```json
 {
   "services": [
-    { "pid": 44121, "process": "node", "ports": [5173] },
-    { "pid": 55231, "process": "java", "ports": [8080] },
+    {
+      "pid": 44121,
+      "process": "node",
+      "ports": [5173],
+      "command": "node vite --port 5173",
+      "project": {
+        "name": "my-app",
+        "path": "/Users/k/dev/my-app",
+        "branch": "feature/login"
+      }
+    },
     { "pid": 3332, "process": "postgres", "ports": [5432] }
   ],
   "generatedAt": 1760000000000,
@@ -26,6 +35,9 @@ Rust 커맨드를 아래에 문서화한다.
 
 - `services`: dev 관련성 필터(`src-tauri/src/scanner/registry.rs`의 allowlist)를 통과한
   프로세스만 포함. 포트 오름차순 정렬.
+- `services[].command`: 실행 명령줄 요약(최대 200자). 읽지 못하면 필드 생략.
+- `services[].project`: cwd에서 도출. cwd가 git 저장소면 저장소 루트의 폴더명과 브랜치,
+  아니면 cwd 폴더명(브랜치 없음). cwd를 못 읽으면 필드 생략.
 - `generatedAt`: Unix epoch 밀리초.
 - `host.os`: `macos` | `windows` | `linux` (`std::env::consts::OS`).
 
