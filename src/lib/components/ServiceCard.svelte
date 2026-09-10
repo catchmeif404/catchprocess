@@ -3,8 +3,8 @@
   // 종이 카드, 잉크 테두리, 위쪽 테이프, 스탬프 레드 포인트.
   // 1행: 프로젝트 이름(git 저장소명, 없으면 프로세스명) + 포트 + 중지 버튼
   // 2행: 프로세스명 · PID · 브랜치
-  // 중지 버튼은 2단계 확인: 첫 클릭에 확인 상태가 되고(3초 후 자동 해제),
-  // 다시 클릭해야 SIGTERM이 전송된다. 도트는 스탬프 레드 — 리슨 중인 것만 담긴다.
+  // 중지 버튼은 단일 클릭 즉시 중지: 확인 단계 없이 SIGTERM → (유예 후) SIGKILL.
+  // 도트는 스탬프 레드 — 리슨 중인 것만 담긴다.
   import type { Service } from '$lib/types';
   import { t } from '$lib/i18n.svelte';
   import { stopService } from '$lib/api';
@@ -17,11 +17,8 @@
 
   let { service, onstop }: Props = $props();
 
-  // 확인 상태 자동 해제 타이머. 카드가 사라지거나 단계가 바뀌면 정리한다.
-  let confirming = $state(false);
   let stopping = $state(false);
   let failed = $state(false);
-  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
   // 파생 값: ":5173 :8080" 형태의 포트 라벨.
   const portLabel = $derived(service.ports.map((port) => `:${port}`).join(' '));
@@ -41,27 +38,13 @@
     }),
   );
 
-  function resetConfirm(): void {
-    confirming = false;
-    clearTimeout(confirmTimer);
-  }
-
   function handleStopClick(): void {
     if (stopping) return;
-    if (!confirming) {
-      // 1차 클릭: 확인 단계 진입. 3초 내 재클릭이 없으면 자동 해제.
-      confirming = true;
-      failed = false;
-      clearTimeout(confirmTimer);
-      confirmTimer = setTimeout(resetConfirm, 3000);
-      return;
-    }
-    // 2차 클릭: 실제 종료 신호 전송.
-    resetConfirm();
     stopping = true;
+    failed = false;
     void stopService(service.pid)
       .then(() => {
-        onstop?.(service.pid); // 성공: 즉시 재스캔 요청, 다음 스냅샷에서 카드가 사라진다.
+        onstop?.(service.pid); // 성공: 즉시 재스캔 요청, 스냅샷에서 카드가 사라진다.
       })
       .catch(() => {
         // OS 거부 등 실패: 카드 안에 실패 표시(다음 폴링/재클릭까지 유지).
@@ -81,12 +64,12 @@
     <span class="ports">{portLabel}</span>
     <button
       class="stop"
-      class:confirming
+      class:stopping
       type="button"
-      aria-label={confirming ? t('confirmStop') : t('stop')}
+      aria-label={t('stop')}
       onclick={handleStopClick}
     >
-      {confirming ? t('confirmStop') : '■'}
+      ■
     </button>
   </div>
   <div class="meta">
@@ -171,12 +154,9 @@
     color: var(--stamp);
   }
 
-  .stop.confirming {
-    background: var(--stamp);
-    border-color: var(--stamp);
-    color: var(--paper);
-    font-size: 0.6rem;
-    font-weight: 700;
+  .stop.stopping {
+    color: var(--stamp);
+    cursor: wait;
   }
 
   .meta {

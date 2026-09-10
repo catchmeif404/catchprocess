@@ -61,23 +61,11 @@ describe('ServiceCard', () => {
 
     const baseService: Service = { pid: 85610, process: 'node', ports: [3001] };
 
-    it('첫 클릭에는 확인 단계로 들어가고 SIGTERM을 보내지 않는다', async () => {
+    it('단일 클릭으로 즉시 중지 신호를 보내고 콜백을 호출한다', async () => {
       const onstop = vi.fn();
       render(ServiceCard, { props: { service: baseService, onstop } });
 
       await fireEvent.click(screen.getByRole('button', { name: 'stop service' }));
-
-      expect(screen.getByRole('button', { name: 'confirm?' })).toBeInTheDocument();
-      expect(mockedStop).not.toHaveBeenCalled();
-      expect(onstop).not.toHaveBeenCalled();
-    });
-
-    it('확인 상태에서 다시 클릭하면 중지 신호를 보내고 콜백을 호출한다', async () => {
-      const onstop = vi.fn();
-      render(ServiceCard, { props: { service: baseService, onstop } });
-
-      await fireEvent.click(screen.getByRole('button', { name: 'stop service' }));
-      await fireEvent.click(screen.getByRole('button', { name: 'confirm?' }));
 
       await waitFor(() => expect(mockedStop).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(mockedStop).toHaveBeenCalledWith(85610));
@@ -90,7 +78,6 @@ describe('ServiceCard', () => {
       render(ServiceCard, { props: { service: baseService, onstop } });
 
       await fireEvent.click(screen.getByRole('button', { name: 'stop service' }));
-      await fireEvent.click(screen.getByRole('button', { name: 'confirm?' }));
 
       await waitFor(() => expect(screen.getByText('stop failed')).toBeInTheDocument());
       expect(onstop).not.toHaveBeenCalled();
