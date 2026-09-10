@@ -3,15 +3,20 @@
   // 데이터 페칭은 lib/api 클라이언트에 위임하고, 여기서는 3초 폴링과 상태 표시만 담당한다.
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
+  import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
   import { getLocale, t } from '$lib/i18n.svelte';
+  import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
   import type { Snapshot } from '$lib/types';
 
   let snapshot = $state<Snapshot | null>(null);
   let failed = $state(false);
+  let query = $state('');
 
-  const serviceCount = $derived(snapshot?.services.length ?? 0);
+  const services = $derived(snapshot?.services ?? []);
+  const visibleServices = $derived(filterServices(services, query));
+  const serviceCount = $derived(services.length);
   const updatedAt = $derived(
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
   );
@@ -56,7 +61,9 @@
   <!-- 프레임리스 창 드래그 영역: 헤더 전체. 시각적 "바" 없이 텍스트만 떠 있다. -->
   <header data-tauri-drag-region>
     <span class="brand" data-tauri-drag-region>{t('title')}</span>
-    <span class="count" data-tauri-drag-region>{t('servicesUp', { count: serviceCount })}</span>
+    <span class="count" data-tauri-drag-region>
+      {t('servicesUp', { count: query.trim() ? visibleServices.length : serviceCount })}
+    </span>
     <button
       class="close"
       type="button"
@@ -67,19 +74,31 @@
     </button>
   </header>
 
+  <div class="searchrow">
+    <input
+      class="search"
+      type="search"
+      placeholder={t('searchPlaceholder')}
+      bind:value={query}
+      aria-label={t('searchPlaceholder')}
+    />
+  </div>
+
   {#if failed}
     <p class="status error" role="alert">{t('scanFailed')}</p>
-  {:else if snapshot && snapshot.services.length > 0}
-    <ul class="list">
-      {#each snapshot.services as service (service.pid)}
+  {:else if serviceCount === 0}
+    <p class="status">{t('empty')}</p>
+  {:else if visibleServices.length === 0}
+    <p class="status">{t('noMatches')}</p>
+  {:else}
+    <ul class="list" use:dragScroll>
+      {#each visibleServices as service (service.pid)}
         <ServiceCard {service} {onstop} />
       {/each}
     </ul>
     {#if updatedAt}
       <p class="status">{t('updatedAt', { time: updatedAt })}</p>
     {/if}
-  {:else}
-    <p class="status">{t('empty')}</p>
   {/if}
 </div>
 
@@ -142,6 +161,32 @@
     color: var(--stamp);
   }
 
+  /* 검색 칸: site 팁 폼 입력 스타일(종이 위 잉크 테두리)을 위젯 크기로 축소 */
+  .searchrow {
+    display: flex;
+  }
+
+  .search {
+    flex: 1;
+    min-width: 0;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid rgba(36, 31, 26, 0.4);
+    border-radius: 2px;
+    background: var(--paper-card);
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.72rem;
+  }
+
+  .search:focus-visible {
+    outline: 2px solid var(--stamp);
+    outline-offset: 1px;
+  }
+
+  .search::placeholder {
+    color: var(--ink-muted);
+  }
+
   .list {
     display: flex;
     flex-direction: column;
@@ -149,8 +194,10 @@
     margin: 0;
     padding: 0;
     overflow-y: auto;
-    /* 사이드 스크롤바 숨김 — 휠/트랙패드 스크롤은 동작한다 */
+    /* 사이드 스크롤바 숨김 — 휠/트랙패드 스크롤과 드래그 스크롤이 동작한다 */
     scrollbar-width: none;
+    /* 드래그 스크롤 중 텍스트 선택 방지 */
+    user-select: none;
   }
 
   .list::-webkit-scrollbar {
