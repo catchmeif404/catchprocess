@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   // 위젯 메인 화면: 헤더(드래그 영역 + 개수 + 갱신 시각 + 닫기)와 서비스 카드 목록.
   // 데이터 페칭은 lib/api 클라이언트에 위임하고, 여기서는 3초 폴링과 상태 표시만 담당한다.
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -15,8 +16,8 @@
   let preferences = $state(readPreferences());
   let managedServices = $state(readManagedServices());
   let selectedConfig = $state<ManagedService | null>(null);
-  $effect(() => {
-    if (typeof window !== 'undefined') managedServices = readManagedServices();
+  onMount(() => {
+    managedServices = readManagedServices();
   });
   let showHidden = $state(false);
   let showConfigured = $state(false);
