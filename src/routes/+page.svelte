@@ -31,6 +31,12 @@
       envText: '',
     };
   }
+  function openNewSettings() {
+    selectedConfig = {
+      key: `manual:${Date.now()}`,
+      name: '', cwd: '', buildCommand: '', runCommand: '', envText: '',
+    };
+  }
   function saveServiceConfig(config: ManagedService) {
     managedServices = [...managedServices.filter(item => item.key !== config.key), config];
     try { localStorage.setItem(serviceConfigKey, JSON.stringify(managedServices)); } catch { /* Keep the current session usable. */ }
@@ -200,6 +206,7 @@
   </div>
   {#if showConfigured}
     <div class="hidden-panel configured-panel">
+      <button class="register" onclick={openNewSettings}>＋ {t('registerService')}</button>
       {#each managedServices as config (config.key)}
         <div class="hidden-row"><span>{config.name}<small>{config.cwd}</small></span><button onclick={() => selectedConfig = { ...config }}>{t('configure')}</button></div>
       {/each}
