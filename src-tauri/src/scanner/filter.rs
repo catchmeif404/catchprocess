@@ -3,7 +3,7 @@
 //! No OS access happens here: the scanner collects [`ProcessRow`] / [`ListenRow`] inputs at the
 //! edge (sysinfo / netstat2) and this module decides what becomes a widget card.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,23 @@ pub struct Connection {
     pub target: String,
     pub port: u16,
     pub local: bool,
+}
+
+/// Some macOS socket APIs expose IPv4 loopback as an IPv6-compatible address such as
+/// `::7f00:1` instead of `127.0.0.1`. Treat both forms as local loopback.
+fn is_loopback_address(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => address.is_loopback(),
+        IpAddr::V6(address) => {
+            if address.is_loopback() {
+                return true;
+            }
+            let segments = address.segments();
+            let mapped = segments[..6].iter().all(|segment| *segment == 0)
+                || (segments[..5].iter().all(|segment| *segment == 0) && segments[5] == 0xffff);
+            mapped && Ipv4Addr::from(((segments[6] as u32) << 16) | segments[7] as u32).is_loopback()
+        }
+    }
 }
 
 fn is_known_process(name: &str) -> bool {
@@ -156,7 +173,13 @@ pub fn attach_connections(
         .collect();
 
     for row in rows {
-        let local = row.remote_addr.is_loopback() && local_targets.contains_key(&row.remote_port);
+        let loopback = is_loopback_address(row.remote_addr);
+        // A loopback connection to an unknown port is commonly a browser/dev-server internal
+        // socket. It is not a useful service edge, so do not surface ephemeral port noise.
+        if loopback && !local_targets.contains_key(&row.remote_port) {
+            continue;
+        }
+        let local = loopback;
         let target = if local {
             local_targets
                 .get(&row.remote_port)
@@ -376,6 +399,41 @@ mod tests {
 
         assert_eq!(services[0].connections.len(), 1);
         assert!(services[1].connections.is_empty());
+    }
+
+    #[test]
+    fn macos_ipv4_compat_loopback_maps_to_local_listener() {
+        assert!(is_loopback_address("::7f00:1".parse().expect("valid IPv6")));
+        let processes = [proc(1, "java"), proc(2, "postgres")];
+        let listeners = [listen(8080, Some(1)), listen(5432, Some(2))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[connection(&[1], 41000, "::7f00:1", 5432)],
+            &mut services,
+        );
+
+        let java = services.iter().find(|service| service.pid == 1).expect("java service");
+        assert_eq!(java.connections[0].target, "postgres");
+        assert!(java.connections[0].local);
+    }
+
+    #[test]
+    fn unknown_loopback_port_is_ignored() {
+        let processes = [proc(1, "node")];
+        let listeners = [listen(3000, Some(1))];
+        let mut services = filter_services(&processes, &listeners, false);
+
+        attach_connections(
+            &processes,
+            &listeners,
+            &[connection(&[1], 41000, "127.0.0.1", 59803)],
+            &mut services,
+        );
+
+        assert!(services[0].connections.is_empty());
     }
 
     #[test]
