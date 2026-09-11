@@ -3,7 +3,7 @@
   // 위젯 메인 화면: 헤더(드래그 영역 + 개수 + 갱신 시각 + 닫기)와 서비스 카드 목록.
   // 데이터 페칭은 lib/api 클라이언트에 위임하고, 여기서는 3초 폴링과 상태 표시만 담당한다.
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { loadManagedServices, persistManagedServices, SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
+  import { loadManagedServices, persistManagedServices, SCAN_INTERVAL_MS, fetchSnapshot, startService, stopService } from '$lib/api';
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
   import ServiceSettings from '$lib/components/ServiceSettings.svelte';
@@ -12,7 +12,8 @@
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
   import type { Service, Snapshot } from '$lib/types';
-  import { readManagedServices, readPreferences, preferenceKey, serviceConfigKey, serviceKey, type ManagedService } from '$lib/view-preferences';
+  import { readManagedServices, readPreferences, preferenceKey, serviceConfigKey, serviceKey, parseEnvironment, type ManagedService } from '$lib/view-preferences';
+  import { matchManagedServices, type ManagedStatus } from '$lib/managed-status';
   let preferences = $state(readPreferences());
   let managedServices = $state<ManagedService[]>([]);
   let selectedConfig = $state<ManagedService | null>(null);
@@ -53,6 +54,30 @@
     void persistManagedServices(managedServices);
     try { localStorage.setItem(serviceConfigKey, JSON.stringify(managedServices)); } catch { /* Legacy fallback only. */ }
     selectedConfig = null;
+  }
+
+  // 설정 패널의 빠른 시작/재시작. 종료(terminate)는 프로세스 소멸을 확인한 뒤에야 반환하므로
+  // 재시작에서 이전 인스턴스가 포트를 붙잡은 채 새 인스턴스가 뜨는 race는 생기지 않는다.
+  let busyKey = $state<string | null>(null);
+  let panelError = $state('');
+  async function startManaged(config: ManagedService) {
+    busyKey = config.key; panelError = '';
+    try {
+      await startService({ command: config.runCommand, cwd: config.cwd, env: parseEnvironment(config.envText) });
+      await load();
+    } catch (error) {
+      panelError = `${t('startFailed')}: ${error instanceof Error ? error.message : String(error)}`;
+    } finally { busyKey = null; }
+  }
+  async function restartManaged(status: ManagedStatus) {
+    busyKey = status.config.key; panelError = '';
+    try {
+      for (const pid of status.pids) await stopService(pid);
+      await startService({ command: status.config.runCommand, cwd: status.config.cwd, env: parseEnvironment(status.config.envText) });
+      await load();
+    } catch (error) {
+      panelError = `${t('startFailed')}: ${error instanceof Error ? error.message : String(error)}`;
+    } finally { busyKey = null; }
   }
   function hideService(service: Service) {
     preferences.hidden = [...new Set([...preferences.hidden, serviceKey(service)])];
@@ -119,6 +144,7 @@
     return rank(a.key) - rank(b.key) || a.name.localeCompare(b.name);
   }));
   const serviceCount = $derived(services.length);
+  const managedStatuses = $derived(matchManagedServices(managedServices, services));
   const updatedAt = $derived(
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
   );
@@ -219,8 +245,18 @@
   {#if showConfigured}
     <div class="hidden-panel configured-panel">
       <button class="register" onclick={openNewSettings}>＋ {t('registerService')}</button>
-      {#each managedServices as config (config.key)}
-        <div class="hidden-row"><span>{config.name}<small>{config.cwd}</small></span><button onclick={() => selectedConfig = { ...config }}>{t('configure')}</button></div>
+      {#if panelError}<p class="panel-error" role="alert">{panelError}</p>{/if}
+      {#each managedStatuses as status (status.config.key)}
+        <div class="hidden-row">
+          <span>{status.config.name}<small>{status.config.cwd}</small></span>
+          <span class="run-state" class:down={!status.running}>{status.running ? t('statusUp', { pids: status.pids.join(', ') }) : t('statusDown')}</span>
+          {#if status.running}
+            <button disabled={busyKey !== null || !status.config.runCommand} onclick={() => void restartManaged(status)}>{busyKey === status.config.key ? t('working') : t('restart')}</button>
+          {:else}
+            <button disabled={busyKey !== null || !status.config.runCommand} onclick={() => void startManaged(status.config)}>{busyKey === status.config.key ? t('working') : t('start')}</button>
+          {/if}
+          <button onclick={() => selectedConfig = { ...status.config }}>{t('configure')}</button>
+        </div>
       {/each}
     </div>
   {/if}
@@ -493,6 +529,9 @@
   .hidden-row { display: flex; align-items: center; gap: 8px; }
   .hidden-row span { overflow-wrap: anywhere; flex: 1; }
   .hidden-row small { display: block; margin-top: 3px; color: var(--ink-muted); font: 11px/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
+  .run-state { flex: none !important; padding: 2px 6px; border: 1px solid var(--stamp); border-radius: 3px; color: var(--stamp); font: 10px/1.4 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .04em; }
+  .run-state.down { border-color: var(--ink-muted); color: var(--ink-muted); }
+  .panel-error { margin: 4px 0; color: var(--stamp); font: 11px/1.4 system-ui; }
   .configured-panel { max-height: 220px; }
   .status { margin-top: 0; flex-shrink: 0; background: transparent; border: 0; padding: 0; font: 11px system-ui; }
 </style>
