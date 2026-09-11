@@ -6,7 +6,6 @@
 //! git 호출은 이 모듈의 가장자리에만 존재하고, 파싱/이름 도출은 순수 함수로 유닛 테스트한다.
 
 use std::fs;
-use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
 
@@ -29,6 +28,14 @@ pub struct ProjectInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ApiTarget {
     pub host: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseTarget {
+    pub engine: String,
+    pub database: String,
     pub port: u16,
 }
 
@@ -77,19 +84,15 @@ fn api_target_from_token(token: &str) -> Option<ApiTarget> {
         .split('/').next()?;
     let authority = authority.split('?').next()?.split('#').next()?;
     let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
-        let (host, port) = rest.split_once("]:" )?;
+        let (host, port) = rest.split_once("]:")?;
         (host.to_string(), port.parse().ok()?)
     } else {
-        let (host, port) = authority.rsplit_once(':')?;
-        (host.to_string(), port.parse().ok()?)
+        match authority.rsplit_once(':') {
+            Some((host, port)) if port.parse::<u16>().is_ok() => (host.to_string(), port.parse().ok()?),
+            _ => (authority.to_string(), if token.starts_with("https://") { 443 } else { 80 }),
+        }
     };
     if host.is_empty() || port == 0 { return None; }
-    let is_local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
-        || host.parse::<IpAddr>().is_ok_and(|address| match address {
-            IpAddr::V4(address) => address.is_private() || address.is_loopback(),
-            IpAddr::V6(address) => address.is_loopback() || address.is_unique_local(),
-        });
-    if !is_local { return None; }
     Some(ApiTarget { host, port })
 }
 
@@ -115,6 +118,38 @@ fn extract_api_targets(text: &str) -> Vec<ApiTarget> {
     targets
 }
 
+fn extract_database_targets(text: &str) -> Vec<DatabaseTarget> {
+    let mut targets = Vec::new();
+    for line in text.lines() {
+        let lowered = line.to_lowercase();
+        let Some(start) = lowered.find("jdbc:") else { continue; };
+        let rest = &line[start + 5..];
+        let Some((engine, after_scheme)) = rest.split_once("://") else { continue; };
+        let engine = engine.to_lowercase();
+        if !matches!(engine.as_str(), "postgresql" | "mysql" | "mariadb") { continue; }
+        let authority = after_scheme.split('/').next().unwrap_or_default();
+        let port = authority
+            .rsplit_once(':')
+            .and_then(|(_, value)| value.split(['}', '?']).next()?.parse().ok())
+            .unwrap_or(if engine == "postgresql" { 5432 } else { 3306 });
+        let Some(database_part) = after_scheme.split('/').nth(1) else { continue; };
+        let database_part = database_part
+            .split(['?', ' ', '"', '\'', '}'])
+            .next()
+            .unwrap_or_default();
+        let database = database_part
+            .split_once(':')
+            .map(|(_, value)| value)
+            .unwrap_or(database_part)
+            .trim_matches(['{', '$', '}'])
+            .to_string();
+        if database.is_empty() { continue; }
+        let target = DatabaseTarget { engine, database, port };
+        if !targets.contains(&target) { targets.push(target); }
+    }
+    targets
+}
+
 /// Read only source-like files under shallow `src` directories. Values are reduced to local
 /// host/port pairs immediately; secrets and arbitrary file contents never enter ProjectInfo.
 pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
@@ -131,7 +166,7 @@ pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
                 if !matches!(name, ".git" | "node_modules" | ".next" | "target" | "dist" | "build" | ".gradle") {
                     directories.push(path);
                 }
-            } else if files.len() < 200 && matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs")) {
+            } else if files.len() < 200 && matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "properties" | "yml" | "yaml")) {
                 files.push(path);
             }
         }
@@ -145,6 +180,37 @@ pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
         }
     }
     targets.sort_by(|left, right| left.port.cmp(&right.port).then(left.host.cmp(&right.host)));
+    targets
+}
+
+pub fn discover_database_targets(root: &Path) -> Vec<DatabaseTarget> {
+    let mut files = Vec::new();
+    let mut directories = vec![root.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        let depth = directory.strip_prefix(root).map(|path| path.components().count()).unwrap_or(99);
+        if depth > 4 { continue; }
+        let Ok(entries) = fs::read_dir(&directory) else { continue; };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            if path.is_dir() {
+                if !matches!(name, ".git" | "node_modules" | ".next" | "target" | "dist" | "build" | ".gradle") {
+                    directories.push(path);
+                }
+            } else if files.len() < 200 && matches!(path.extension().and_then(|ext| ext.to_str()), Some("properties" | "yml" | "yaml")) {
+                files.push(path);
+            }
+        }
+    }
+    let mut targets = Vec::new();
+    for file in files {
+        let Ok(text) = fs::read_to_string(file) else { continue; };
+        let text = text.chars().take(512 * 1024).collect::<String>();
+        for target in extract_database_targets(&text) {
+            if !targets.contains(&target) { targets.push(target); }
+        }
+    }
+    targets.sort_by(|left, right| left.port.cmp(&right.port).then(left.database.cmp(&right.database)));
     targets
 }
 
@@ -229,6 +295,23 @@ mod tests {
             "const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';\nconst SITE_URL = 'https://example.com';",
         );
         assert_eq!(targets, vec![ApiTarget { host: "localhost".into(), port: 8080 }]);
+    }
+
+    #[test]
+    fn extracts_external_api_default_https_port() {
+        let targets = extract_api_targets("const API_BASE_URL = 'https://api.example.com';");
+        assert_eq!(targets, vec![ApiTarget { host: "api.example.com".into(), port: 443 }]);
+    }
+
+    #[test]
+    fn extracts_database_name_without_credentials() {
+        let targets = extract_database_targets(
+            "spring.datasource.url=jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:aws_calculator}",
+        );
+        assert_eq!(
+            targets,
+            vec![DatabaseTarget { engine: "postgresql".into(), database: "aws_calculator".into(), port: 5432 }]
+        );
     }
 
     #[test]

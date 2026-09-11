@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 
-use super::project::{ApiTarget, ProjectInfo};
+use super::project::{ApiTarget, DatabaseTarget, ProjectInfo};
 use super::registry::{KNOWN_DEV_PORTS, KNOWN_PROCESS_NAMES};
 
 /// One process from the OS process table.
@@ -59,6 +59,9 @@ pub struct Service {
     /// API endpoints discovered from this process's working directory.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub api_targets: Vec<ApiTarget>,
+    /// Database targets discovered from this process's working directory.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub database_targets: Vec<DatabaseTarget>,
 }
 
 /// A connection from a displayed service to a local listener or external endpoint.
@@ -142,6 +145,7 @@ pub fn filter_services(
                 project: None,
                 connections: Vec::new(),
                 api_targets: Vec::new(),
+                database_targets: Vec::new(),
             }
         })
         .collect();

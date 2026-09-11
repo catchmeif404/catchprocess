@@ -45,6 +45,12 @@
   );
   const connections = $derived(service.connections ?? []);
   const apiTargets = $derived(service.apiTargets ?? []);
+  const databaseTargets = $derived(service.databaseTargets ?? []);
+
+  function connectionTargetLabel(connection: NonNullable<Service['connections']>[number]): string {
+    const database = databaseTargets.find((target) => target.port === connection.port);
+    return database ? `${database.engine} · ${database.database}` : connection.target;
+  }
 
   function handleStopClick(): void {
     if (stopping) return;
@@ -91,7 +97,7 @@
           <span class="connection-scope">
             {connection.local ? t('localConnection') : t('externalConnection')}
           </span>
-          {t('connectedTo', { target: connection.target, port: connection.port })}
+          {t('connectedTo', { target: connectionTargetLabel(connection), port: connection.port })}
         </span>
       {/each}
     </div>

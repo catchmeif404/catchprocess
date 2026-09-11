@@ -31,12 +31,20 @@ export interface Service {
   connections?: Connection[];
   /** source-discovered API endpoints for this process's working directory. */
   apiTargets?: ApiTarget[];
+  /** source-discovered database targets for this process's working directory. */
+  databaseTargets?: DatabaseTarget[];
 }
 
 export interface Connection {
   target: string;
   port: number;
   local: boolean;
+}
+
+export interface DatabaseTarget {
+  engine: string;
+  database: string;
+  port: number;
 }
 
 export interface HostInfo {

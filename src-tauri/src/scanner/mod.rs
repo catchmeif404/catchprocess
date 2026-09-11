@@ -158,6 +158,7 @@ pub fn scan() -> Snapshot {
         if let Some(process) = system.process(Pid::from_u32(service.pid)) {
             if let Some(cwd) = process.cwd() {
                 service.api_targets = project::discover_api_targets(cwd);
+                service.database_targets = project::discover_database_targets(cwd);
             }
         }
     }
