@@ -146,6 +146,15 @@
       >KO</button>
     </div>
     <button
+      class="window-hide"
+      type="button"
+      aria-label={t('hideWindow')}
+      title={t('hideWindow')}
+      onclick={() => void getCurrentWindow().hide()}
+    >
+      —
+    </button>
+    <button
       class="close"
       type="button"
       aria-label={t('close')}
@@ -255,6 +264,7 @@
     letter-spacing: 0.03em;
   }
 
+  .window-hide,
   .close {
     flex: none;
     padding: 0 0.35rem;
@@ -296,6 +306,7 @@
     color: var(--stamp);
   }
 
+  .window-hide:hover,
   .close:hover {
     background: rgba(163, 43, 43, 0.12);
     color: var(--stamp);
