@@ -1,85 +1,78 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  // 위젯 메인 화면: 헤더(드래그 영역 + 개수 + 갱신 시각 + 닫기)와 서비스 카드 목록.
-  // 데이터 페칭은 lib/api 클라이언트에 위임하고, 여기서는 3초 폴링과 상태 표시만 담당한다.
+  // 위젯 메인 화면 — 구성 주도 모델. 기본 뷰는 보드(프로젝트별 구성도 판) 위에서
+  // 노드를 켜고/끄는 구성도 맵이고, 카드 뷰는 현재 감지된 프로세스의 증거 뷰다.
+  // 감지(스캐너)는 보드를 채울 때의 조수이자 카드 뷰의 내용일 뿐, 맵의 진실은 보드다.
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { loadManagedServices, persistManagedServices, SCAN_INTERVAL_MS, fetchSnapshot, startService, stopService } from '$lib/api';
+  import { loadBoards, loadManagedServices, persistBoards, SCAN_INTERVAL_MS, fetchSnapshot, startService, stopService } from '$lib/api';
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
-  import ServiceSettings from '$lib/components/ServiceSettings.svelte';
+  import BoardNodeEditor from '$lib/components/BoardNodeEditor.svelte';
   import TopologyCanvas from '$lib/components/TopologyCanvas.svelte';
   import { apiLabel } from '$lib/service-presentation';
   import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
   import type { Service, Snapshot } from '$lib/types';
-  import { readManagedServices, readPreferences, preferenceKey, serviceConfigKey, serviceKey, parseEnvironment, type ManagedService } from '$lib/view-preferences';
-  import { matchManagedServices, type ManagedStatus } from '$lib/managed-status';
-  import { buildTopology, layoutTopology } from '$lib/topology';
+  import { readPreferences, preferenceKey, serviceKey, parseEnvironment } from '$lib/view-preferences';
+  import { boardFromManagedServices, newNode, nodeFromDetectedService, normalizeBoards, type Board, type BoardNode } from '$lib/boards';
+  import { buildBoardTopology, layoutTopology } from '$lib/topology';
+
   let preferences = $state(readPreferences());
-  let managedServices = $state<ManagedService[]>([]);
-  let selectedConfig = $state<ManagedService | null>(null);
-  onMount(async () => {
-    try {
-      const fileServices = await loadManagedServices();
-      const legacyServices = readManagedServices();
-      managedServices = fileServices.length > 0 ? fileServices : legacyServices;
-      if (fileServices.length === 0 && legacyServices.length > 0) await persistManagedServices(legacyServices);
-    } catch {
-      managedServices = readManagedServices();
-    }
-  });
-  let showHidden = $state(false);
-  let showConfigured = $state(false);
-  function saveView() {
-    try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch { /* Session state still works. */ }
-  }
-  function openSettings(service: Service) {
-    const key = serviceKey(service);
-    selectedConfig = managedServices.find(item => item.key === key) ?? {
-      key,
-      name: service.project?.name ? `${service.project.name} ${service.process}` : service.process,
-      cwd: service.project?.path ?? '',
-      buildCommand: '',
-      runCommand: '',
-      envText: '',
-    };
-  }
-  function openNewSettings() {
-    selectedConfig = {
-      key: `manual:${Date.now()}`,
-      name: '', cwd: '', buildCommand: '', runCommand: '', envText: '',
-    };
-  }
-  function saveServiceConfig(config: ManagedService) {
-    managedServices = [...managedServices.filter(item => item.key !== config.key), config];
-    void persistManagedServices(managedServices);
-    try { localStorage.setItem(serviceConfigKey, JSON.stringify(managedServices)); } catch { /* Legacy fallback only. */ }
-    selectedConfig = null;
+  let boards = $state<Board[]>([]);
+  let activeBoardId = $state<string | null>(null);
+  const activeBoard = $derived(boards.find((board) => board.id === activeBoardId) ?? null);
+
+  function newBoardId(): string {
+    return `b:${crypto.randomUUID().slice(0, 8)}`;
   }
 
-  // 설정 패널의 빠른 시작/재시작. 종료(terminate)는 프로세스 소멸을 확인한 뒤에야 반환하므로
-  // 재시작에서 이전 인스턴스가 포트를 붙잡은 채 새 인스턴스가 뜨는 race는 생기지 않는다.
-  let busyKey = $state<string | null>(null);
-  let panelError = $state('');
-  async function startManaged(config: ManagedService) {
-    busyKey = config.key; panelError = '';
-    try {
-      await startService({ command: config.runCommand, cwd: config.cwd, env: parseEnvironment(config.envText) });
-      await load();
-    } catch (error) {
-      panelError = `${t('startFailed')}: ${error instanceof Error ? error.message : String(error)}`;
-    } finally { busyKey = null; }
+  async function persistAll(): Promise<void> {
+    try { await persistBoards(boards); } catch { /* 다음 변경 때 다시 시도한다. */ }
   }
-  async function restartManaged(status: ManagedStatus) {
-    busyKey = status.config.key; panelError = '';
-    try {
-      for (const pid of status.pids) await stopService(pid);
-      await startService({ command: status.config.runCommand, cwd: status.config.cwd, env: parseEnvironment(status.config.envText) });
-      await load();
-    } catch (error) {
-      panelError = `${t('startFailed')}: ${error instanceof Error ? error.message : String(error)}`;
-    } finally { busyKey = null; }
+
+  function updateBoard(boardId: string, update: (board: Board) => Board): void {
+    boards = boards.map((board) => (board.id === boardId ? update(board) : board));
+    void persistAll();
+  }
+
+  onMount(async () => {
+    let stored: Board[] = [];
+    try { stored = normalizeBoards(await loadBoards()); } catch { stored = []; }
+    if (stored.length > 0) {
+      boards = stored;
+    } else {
+      // 마이그레이션: 옛 플랫 설정(services.json)이 있으면 기본 보드로 옮긴다.
+      try {
+        const legacy = await loadManagedServices();
+        if (legacy.length > 0) {
+          boards = [boardFromManagedServices(newBoardId(), t('defaultBoardName'), legacy)];
+          await persistBoards(boards);
+        }
+      } catch { /* legacy 파일이 없으면 그냥 빈 상태다. */ }
+    }
+    activeBoardId = (preferences.activeBoardId && boards.some((board) => board.id === preferences.activeBoardId))
+      ? preferences.activeBoardId
+      : boards[0]?.id ?? null;
+  });
+
+  function createBoard(): void {
+    const board: Board = { id: newBoardId(), name: `${t('defaultBoardName')} ${boards.length + 1}`, nodes: [], edges: [] };
+    boards = [...boards, board];
+    activeBoardId = board.id;
+    void persistAll();
+  }
+
+  function deleteBoard(): void {
+    if (!activeBoard || !window.confirm(t('confirmDeleteBoard'))) return;
+    boards = boards.filter((board) => board.id !== activeBoard.id);
+    activeBoardId = boards[0]?.id ?? null;
+    void persistAll();
+  }
+
+  let showHidden = $state(false);
+  function saveView() {
+    try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch { /* Session state still works. */ }
   }
   function hideService(service: Service) {
     preferences.hidden = [...new Set([...preferences.hidden, serviceKey(service)])];
@@ -146,59 +139,6 @@
     return rank(a.key) - rank(b.key) || a.name.localeCompare(b.name);
   }));
   const serviceCount = $derived(services.length);
-  const managedStatuses = $derived(matchManagedServices(managedServices, services));
-
-  // ---- 구성도(맵) 뷰 ----
-  const CANVAS_WIDTH = 552;
-  const topology = $derived(buildTopology(visibleServices, managedStatuses.filter((status) => !status.running)));
-  const laidOut = $derived(layoutTopology(topology, CANVAS_WIDTH, preferences.positions));
-  let selectedNodeId = $state<string | null>(null);
-  // 3초 폴링으로 스캔 결과가 바뀌어도 사용자가 끌어놓은 노드 위치는 유지한다.
-  function saveNodePosition(id: string, x: number, y: number): void {
-    preferences.positions = { ...preferences.positions, [id]: { x, y } };
-    saveView();
-  }
-  const selectedNode = $derived(laidOut.nodes.find((node) => node.id === selectedNodeId) ?? null);
-  function nodeConfig(node: NonNullable<typeof selectedNode>): ManagedService | null {
-    if (node.managed) return node.managed;
-    if (node.service) return managedServices.find((item) => item.key === node.id) ?? null;
-    return null;
-  }
-  let nodeBusy = $state(false);
-  let nodeError = $state('');
-  async function stopNode(node: NonNullable<typeof selectedNode>): Promise<void> {
-    if (!node.pids?.length) return;
-    nodeBusy = true; nodeError = '';
-    try {
-      for (const pid of node.pids) await stopService(pid);
-      await load();
-    } catch (error) {
-      nodeError = error instanceof Error ? error.message : String(error);
-    } finally { nodeBusy = false; }
-  }
-  async function startNode(node: NonNullable<typeof selectedNode>): Promise<void> {
-    const config = nodeConfig(node);
-    if (!config) return;
-    nodeBusy = true; nodeError = '';
-    try {
-      await startService({ command: config.runCommand, cwd: config.cwd, env: parseEnvironment(config.envText) });
-      await load();
-    } catch (error) {
-      nodeError = error instanceof Error ? error.message : String(error);
-    } finally { nodeBusy = false; }
-  }
-  function configureNode(node: NonNullable<typeof selectedNode>): void {
-    const config = nodeConfig(node);
-    if (config) {
-      selectedConfig = { ...config };
-      return;
-    }
-    if (node.service) openSettings(node.service);
-  }
-  function setView(view: 'map' | 'cards'): void {
-    preferences.view = view;
-    saveView();
-  }
   const updatedAt = $derived(
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
   );
@@ -233,7 +173,137 @@
     const timer = setInterval(() => void load(), SCAN_INTERVAL_MS);
     return () => clearInterval(timer);
   });
+
+  // ---- 구성도(보드 맵) 뷰 ----
+  const CANVAS_WIDTH = 552;
+  const boardTopology = $derived(activeBoard ? buildBoardTopology(activeBoard, visibleServices) : { nodes: [], edges: [] });
+  const laidOut = $derived(layoutTopology(boardTopology, CANVAS_WIDTH, preferences.positions));
+  let selectedNodeId = $state<string | null>(null);
+  let editingNode = $state<BoardNode | null>(null);
+  let connectMode = $state(false);
+  let connectSource = $state<string | null>(null);
+  let nodeBusy = $state<string | null>(null);
+  let nodeError = $state('');
+
+  function saveNodePosition(id: string, x: number, y: number): void {
+    preferences.positions = { ...preferences.positions, [id]: { x, y } };
+    saveView();
+  }
+
+  function saveBoardNode(node: BoardNode): void {
+    if (!activeBoard) return;
+    updateBoard(activeBoard.id, (board) => ({
+      ...board,
+      nodes: board.nodes.some((existing) => existing.id === node.id)
+        ? board.nodes.map((existing) => (existing.id === node.id ? node : existing))
+        : [...board.nodes, node],
+    }));
+    editingNode = null;
+  }
+
+  function removeNode(nodeId: string): void {
+    if (!activeBoard) return;
+    updateBoard(activeBoard.id, (board) => ({
+      ...board,
+      nodes: board.nodes.filter((node) => node.id !== nodeId),
+      edges: board.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+    }));
+    if (selectedNodeId === nodeId) selectedNodeId = null;
+  }
+
+  // 배선 모드: 첫 번째 노드(출발)를 고르고 다음 노드(도착)를 클릭하면 연결된다.
+  function handleCanvasSelect(nodeId: string | null): void {
+    if (nodeId === null) { selectedNodeId = null; return; }
+    if (connectMode) {
+      if (!connectSource) {
+        connectSource = nodeId;
+        return;
+      }
+      if (connectSource !== nodeId && activeBoard) {
+        const id = `e:${crypto.randomUUID().slice(0, 8)}`;
+        updateBoard(activeBoard.id, (board) => ({
+          ...board,
+          edges: board.edges.some((edge) => edge.source === connectSource && edge.target === nodeId)
+            ? board.edges
+            : [...board.edges, { id, source: connectSource!, target: nodeId }],
+        }));
+      }
+      connectMode = false;
+      connectSource = null;
+      return;
+    }
+    selectedNodeId = selectedNodeId === nodeId ? null : nodeId;
+  }
+
+  function removeEdge(edgeId: string): void {
+    if (!activeBoard) return;
+    updateBoard(activeBoard.id, (board) => ({ ...board, edges: board.edges.filter((edge) => edge.id !== edgeId) }));
+  }
+
+  function parseEnv(text: string): Record<string, string> {
+    return parseEnvironment(text);
+  }
+
+  async function startBoardNode(node: BoardNode): Promise<void> {
+    if (!node.runCommand.trim()) return;
+    nodeBusy = node.id; nodeError = '';
+    try {
+      await startService({ command: node.runCommand, cwd: node.cwd, env: parseEnv(node.envText) });
+      await load();
+    } catch (error) {
+      nodeError = error instanceof Error ? error.message : String(error);
+    } finally { nodeBusy = null; }
+  }
+
+  async function stopPids(pids: number[]): Promise<void> {
+    for (const pid of pids) await stopService(pid);
+    await load();
+  }
+
+  const selectedNode = $derived(laidOut.nodes.find((node) => node.id === selectedNodeId) ?? null);
+  const selectedBoardNode = $derived(
+    selectedNode && activeBoard ? activeBoard.nodes.find((node) => node.id === selectedNode.id) ?? null : null,
+  );
+
+  async function stopSelected(): Promise<void> {
+    if (!selectedNode?.pids?.length) return;
+    nodeBusy = selectedNode.id; nodeError = '';
+    try { await stopPids(selectedNode.pids); }
+    catch (error) { nodeError = error instanceof Error ? error.message : String(error); }
+    finally { nodeBusy = null; }
+  }
+
+  async function startAll(): Promise<void> {
+    if (!activeBoard) return;
+    nodeError = '';
+    for (const node of activeBoard.nodes) {
+      if (node.kind !== 'service' || !node.runCommand.trim()) continue;
+      const graph = boardTopology.nodes.find((candidate) => candidate.id === node.id);
+      if (graph?.kind === 'service') continue;
+      nodeBusy = node.id;
+      try { await startService({ command: node.runCommand, cwd: node.cwd, env: parseEnv(node.envText) }); }
+      catch (error) { nodeError = `${node.name || node.id}: ${error instanceof Error ? error.message : String(error)}`; }
+      finally { nodeBusy = null; }
+    }
+    await load();
+  }
+
+  async function stopAll(): Promise<void> {
+    if (!activeBoard) return;
+    nodeError = '';
+    const pids = boardTopology.nodes.flatMap((node) => (node.kind === 'service' ? node.pids ?? [] : []));
+    nodeBusy = 'all';
+    try { await stopPids(pids); }
+    catch (error) { nodeError = error instanceof Error ? error.message : String(error); }
+    finally { nodeBusy = null; }
+  }
+
+  function setView(view: 'map' | 'cards'): void {
+    preferences.view = view;
+    saveView();
+  }
 </script>
+
 
 <svelte:head>
   <title>DevTopology</title>
@@ -298,26 +368,7 @@
       <button class:active={preferences.view === 'cards'} onclick={() => setView('cards')}>{t('viewCards')}</button>
     </span>
     <button onclick={() => showHidden = !showHidden} aria-expanded={showHidden}>{t('hidden')} ({preferences.hidden.length})</button>
-    <button onclick={() => showConfigured = !showConfigured} aria-expanded={showConfigured}>{t('configuredServices')} ({managedServices.length})</button>
   </div>
-  {#if showConfigured}
-    <div class="hidden-panel configured-panel">
-      <button class="register" onclick={openNewSettings}>＋ {t('registerService')}</button>
-      {#if panelError}<p class="panel-error" role="alert">{panelError}</p>{/if}
-      {#each managedStatuses as status (status.config.key)}
-        <div class="hidden-row">
-          <span>{status.config.name}<small>{status.config.cwd}</small></span>
-          <span class="run-state" class:down={!status.running}>{status.running ? t('statusUp', { pids: status.pids.join(', ') }) : t('statusDown')}</span>
-          {#if status.running}
-            <button disabled={busyKey !== null || !status.config.runCommand} onclick={() => void restartManaged(status)}>{busyKey === status.config.key ? t('working') : t('restart')}</button>
-          {:else}
-            <button disabled={busyKey !== null || !status.config.runCommand} onclick={() => void startManaged(status.config)}>{busyKey === status.config.key ? t('working') : t('start')}</button>
-          {/if}
-          <button onclick={() => selectedConfig = { ...status.config }}>{t('configure')}</button>
-        </div>
-      {/each}
-    </div>
-  {/if}
   {#if showHidden}
     <div class="hidden-panel">
       <p>{t('hiddenNote')}</p>
@@ -329,46 +380,81 @@
 
   {#if failed}
     <p class="status error" role="alert">{t('scanFailed')}</p>
-  {:else if serviceCount === 0}
-    <p class="status">{t('empty')}</p>
-  {:else if visibleServices.length === 0}
-    <p class="status">{t('noMatches')}</p>
   {:else if preferences.view === 'map'}
-    <div class="map-wrap">
-      <TopologyCanvas
-        nodes={laidOut.nodes}
-        edges={topology.edges}
-        width={CANVAS_WIDTH}
-        height={laidOut.height}
-        selectedId={selectedNodeId}
-        onselect={(id) => { selectedNodeId = id; nodeError = ''; }}
-        onnodemove={saveNodePosition}
-      />
-    </div>
-    {#if selectedNode}
-      <div class="node-strip" role="region" aria-label={selectedNode.label}>
-        <div class="strip-head">
-          <strong>{selectedNode.label}</strong>
-          <span class="strip-sub">{selectedNode.sub}{selectedNode.pids?.length ? ` · pid ${selectedNode.pids.join(', ')}` : ''}</span>
-          <span class="run-state" class:down={selectedNode.kind === 'offline'}>{selectedNode.kind === 'offline' ? t('statusDown') : t('statusUp', { pids: selectedNode.pids?.join(', ') ?? '' })}</span>
-          <button class="strip-close" onclick={() => selectedNodeId = null}>×</button>
-        </div>
-        {#if nodeError}<p class="panel-error" role="alert">{nodeError}</p>{/if}
-        <div class="strip-actions">
-          {#if selectedNode.kind === 'offline'}
-            <button disabled={nodeBusy || !nodeConfig(selectedNode)?.runCommand} onclick={() => void startNode(selectedNode)}>{nodeBusy ? t('working') : t('start')}</button>
-          {:else if selectedNode.pids?.length}
-            <button disabled={nodeBusy} onclick={() => void stopNode(selectedNode)}>{nodeBusy ? t('stopping') : t('stop')}</button>
-          {/if}
-          {#if nodeConfig(selectedNode)}
-            <button onclick={() => configureNode(selectedNode)}>{t('configure')}</button>
-          {/if}
-        </div>
+    {#if boards.length === 0}
+      <p class="status">{t('emptyBoard')}</p>
+    {/if}
+    {#if activeBoard}
+      <div class="board-tabs" role="tablist" aria-label="boards">
+        {#each boards as board (board.id)}
+          <button role="tab" aria-selected={board.id === activeBoardId} class:active={board.id === activeBoardId} onclick={() => { activeBoardId = board.id; selectedNodeId = null; connectMode = false; connectSource = null; }}>{board.name}</button>
+        {/each}
+        <button class="board-new" onclick={createBoard}>{t('newBoard')}</button>
       </div>
+      <div class="board-bar">
+        <button disabled={nodeBusy !== null} onclick={() => void startAll()}>{nodeBusy === 'all' ? t('working') : t('startAll')}</button>
+        <button disabled={nodeBusy !== null} onclick={() => void stopAll()}>{nodeBusy === 'all' ? t('working') : t('stopAll')}</button>
+        <span class="spacer"></span>
+        <button class:wiring={connectMode} onclick={() => { connectMode = !connectMode; connectSource = null; selectedNodeId = null; }}>{connectMode ? (connectSource ? t('to') : t('from')) : t('connect')}</button>
+        <button onclick={() => editingNode = newNode('service')}>{t('addNode')}</button>
+        <button onclick={deleteBoard}>{t('deleteBoard')}</button>
+      </div>
+      {#if nodeError}<p class="panel-error" role="alert">{nodeError}</p>{/if}
+      {#if activeBoard.nodes.length === 0}
+        <p class="status">{t('emptyBoard')}</p>
+      {:else}
+        <div class="map-wrap">
+          <TopologyCanvas
+            nodes={laidOut.nodes}
+            edges={boardTopology.edges}
+            width={CANVAS_WIDTH}
+            height={laidOut.height}
+            selectedId={connectMode ? connectSource : selectedNodeId}
+            onselect={handleCanvasSelect}
+            onnodemove={saveNodePosition}
+          />
+        </div>
+        {#if connectMode}
+          <p class="status">{connectSource ? t('to') : t('from')}</p>
+        {/if}
+        {#if selectedNode && selectedBoardNode}
+          <div class="node-strip" role="region" aria-label={selectedNode.label}>
+            <div class="strip-head">
+              <strong>{selectedNode.label}</strong>
+              <span class="strip-sub">{selectedNode.sub}{selectedNode.pids?.length ? ` · pid ${selectedNode.pids.join(', ')}` : ''}</span>
+              <span class="run-state" class:down={selectedNode.kind === 'offline'}>{selectedNode.kind === 'offline' ? t('statusDown') : t('statusUp', { pids: selectedNode.pids?.join(', ') ?? '' })}</span>
+              <button class="strip-close" onclick={() => selectedNodeId = null}>×</button>
+            </div>
+            <div class="strip-actions">
+              {#if selectedNode.kind === 'offline'}
+                <button disabled={nodeBusy !== null || !selectedBoardNode.runCommand} onclick={() => void startBoardNode(selectedBoardNode)}>{nodeBusy === selectedBoardNode.id ? t('working') : t('start')}</button>
+              {:else if selectedNode.pids?.length}
+                <button disabled={nodeBusy !== null} onclick={() => void stopSelected()}>{nodeBusy === selectedBoardNode.id ? t('stopping') : t('stop')}</button>
+              {/if}
+              <button onclick={() => editingNode = { ...selectedBoardNode }}>{t('configure')}</button>
+              <button onclick={() => removeNode(selectedBoardNode.id)}>{t('removeNode')}</button>
+            </div>
+          </div>
+        {/if}
+      {/if}
+      {#if activeBoard.edges.length > 0}
+        <details class="wires">
+          <summary>{t('connect')} ({activeBoard.edges.length})</summary>
+          {#each activeBoard.edges as edge (edge.id)}
+            {@const sourceName = activeBoard.nodes.find((node) => node.id === edge.source)?.name ?? edge.source}
+            {@const targetName = activeBoard.nodes.find((node) => node.id === edge.target)?.name ?? edge.target}
+            <div class="hidden-row"><span>{sourceName} → {targetName}</span><button onclick={() => removeEdge(edge.id)}>×</button></div>
+          {/each}
+        </details>
+      {/if}
     {/if}
     {#if updatedAt}
       <p class="status">{t('updatedAt', { time: updatedAt })}</p>
     {/if}
+  {:else if serviceCount === 0}
+    <p class="status">{t('empty')}</p>
+  {:else if visibleServices.length === 0}
+    <p class="status">{t('noMatches')}</p>
   {:else}
     <div class="groups" use:dragScroll>
       {#each projectGroups as group, index (group.key)}
@@ -385,7 +471,7 @@
                 {service}
                 {onstop}
                 onhide={() => hideService(service)}
-                onconfigure={() => openSettings(service)}
+                onconfigure={() => editingNode = newNode('service', nodeFromDetectedService(service))}
                 compact
                 apiTargetLabels={apiTargetLabels(service)}
               />
@@ -401,8 +487,8 @@
   {/if}
 </div>
 
-{#if selectedConfig}
-  <ServiceSettings config={selectedConfig} onsave={saveServiceConfig} onclose={() => selectedConfig = null} />
+{#if editingNode}
+  <BoardNodeEditor initial={editingNode} detected={services} onsave={saveBoardNode} onclose={() => editingNode = null} />
 {/if}
 
 <style>
@@ -623,6 +709,15 @@
   .view-toggle button { border-radius: 0; }
   .view-toggle button.active { background: var(--ink); color: var(--paper); }
   .map-wrap { overflow: auto; border-radius: 6px; }
+  .board-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+  .board-tabs button { border: 1px solid #241f1a1a; }
+  .board-tabs button.active { background: var(--ink); color: var(--paper); }
+  .board-tabs .board-new { border-style: dashed; color: var(--ink-muted); }
+  .board-bar { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  .board-bar .spacer { flex: 1; }
+  .board-bar .wiring { border-color: var(--stamp); color: var(--stamp); }
+  .wires { margin-top: 6px; font: 12px system-ui; color: var(--ink-muted); }
+  .wires summary { cursor: pointer; }
   .node-strip { position: sticky; bottom: 0; display: grid; gap: 6px; margin-top: 6px; padding: 10px 12px; background: var(--paper-card); border: 1px solid var(--ink); border-radius: 6px; box-shadow: 0 4px 14px rgba(36,31,26,.22); font: 12px system-ui; }
   .strip-head { display: flex; align-items: center; gap: 8px; }
   .strip-head strong { overflow-wrap: anywhere; }
@@ -633,10 +728,8 @@
   .hidden-panel { padding: 10px; max-height: 160px; overflow: auto; background: var(--paper-card); font: 12px system-ui; border-radius: 6px; }
   .hidden-row { display: flex; align-items: center; gap: 8px; }
   .hidden-row span { overflow-wrap: anywhere; flex: 1; }
-  .hidden-row small { display: block; margin-top: 3px; color: var(--ink-muted); font: 11px/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
   .run-state { flex: none !important; padding: 2px 6px; border: 1px solid var(--stamp); border-radius: 3px; color: var(--stamp); font: 10px/1.4 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .04em; }
   .run-state.down { border-color: var(--ink-muted); color: var(--ink-muted); }
   .panel-error { margin: 4px 0; color: var(--stamp); font: 11px/1.4 system-ui; }
-  .configured-panel { max-height: 220px; }
   .status { margin-top: 0; flex-shrink: 0; background: transparent; border: 0; padding: 0; font: 11px system-ui; }
 </style>

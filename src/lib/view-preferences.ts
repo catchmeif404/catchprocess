@@ -3,7 +3,7 @@ import type { NodePosition } from './topology';
 
 export type ViewMode = 'map' | 'cards';
 
-export interface ViewPreferences { hidden: string[]; order: string[]; collapsed: string[]; view: ViewMode; positions: Record<string, NodePosition> }
+export interface ViewPreferences { hidden: string[]; order: string[]; collapsed: string[]; view: ViewMode; positions: Record<string, NodePosition>; activeBoardId: string | null }
 export interface ManagedService {
   key: string;
   name: string;
@@ -13,7 +13,6 @@ export interface ManagedService {
   envText: string;
 }
 export const preferenceKey = 'devtopology.view.v1';
-export const serviceConfigKey = 'devtopology.services.v1';
 export function serviceKey(service: Service): string {
   // Executable names vary by runner (e.g. node vs next-server). Project + ports identifies the
   // local service more reliably across restarts and dev-server implementations.
@@ -37,17 +36,9 @@ export function readPreferences(): ViewPreferences {
       collapsed: strings(value.collapsed),
       view: value.view === 'cards' ? 'cards' : 'map',
       positions,
+      activeBoardId: typeof value.activeBoardId === 'string' ? value.activeBoardId : null,
     };
-  } catch { return { hidden: [], order: [], collapsed: [], view: 'map', positions: {} }; }
-}
-
-export function readManagedServices(): ManagedService[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(serviceConfigKey) ?? '[]');
-    return Array.isArray(value) ? value.filter((item): item is ManagedService =>
-      item && typeof item.key === 'string' && typeof item.name === 'string' && typeof item.cwd === 'string'
-    ) : [];
-  } catch { return []; }
+  } catch { return { hidden: [], order: [], collapsed: [], view: 'map', positions: {}, activeBoardId: null }; }
 }
 
 export function parseEnvironment(text: string): Record<string, string> {

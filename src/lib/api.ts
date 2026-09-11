@@ -3,6 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { Snapshot } from './types';
 import type { ManagedService } from './view-preferences';
+import type { Board } from './boards';
 
 /** Rust 쪽 #[tauri::command] 이름. */
 const COMMAND_GET_SERVICES = 'get_services';
@@ -43,4 +44,13 @@ export function loadManagedServices(): Promise<ManagedService[]> {
 
 export function persistManagedServices(services: ManagedService[]): Promise<void> {
   return invoke<void>('save_managed_services', { services });
+}
+
+/** 구성도 보드 전체를 읽고/쓴다. 보드가 위젯의 진실이다 (boards.json). */
+export function loadBoards(): Promise<Board[]> {
+  return invoke<Board[]>('get_boards');
+}
+
+export function persistBoards(boards: Board[]): Promise<void> {
+  return invoke<void>('save_boards', { boards });
 }

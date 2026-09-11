@@ -1,7 +1,7 @@
 import type { Service } from './types';
 import { serviceKey, type ManagedService } from './view-preferences';
 import { serviceLabel } from './service-presentation';
-import type { ManagedStatus } from './managed-status';
+import { matchBoard, type Board } from './boards';
 
 /** 구성도 노드 — 실행 중 서비스, 꺼진 관리 서비스, DB, 외부 엔드포인트. */
 export interface TopologyNode {
@@ -67,7 +67,10 @@ function listenersOnPort(services: Service[], source: Service, port: number): Se
  * 엣지 우선순위: 관측된 연결(runtime)이 설정 추론(candidate)과 같은 쌍이면 runtime 하나만 남긴다.
  * 실행 중인 관리 서비스는 서비스 노드로 이미 표현되고, 매칭에 실패한 설정만 꺼진 노드가 된다.
  */
-export function buildTopology(services: Service[], managedStatuses: ManagedStatus[]): Topology {
+export function buildTopology(
+  services: Service[],
+  managedStatuses: Array<{ config: ManagedService; running: boolean }>,
+): Topology {
   const nodes = new Map<string, TopologyNode>();
   const edges = new Map<string, TopologyEdge>();
 
@@ -179,6 +182,54 @@ function addEdge(
 }
 
 /**
+ * 구성 주도 모델: 보드(선언된 구성도)를 그래프로 변환한다.
+ * 감지 결과는 노드의 실행 상태(UP 배지 / OFFLINE 점선)로만 등장하고, 배선은 보드의 선언이 진실이다.
+ * 서비스 노드 끊김 없이 켜고 끌 수 있어야 하므로 꺼진 서비스도 offline 노드로 항상 그려진다.
+ */
+export function buildBoardTopology(board: Board, services: Service[]): Topology {
+  const nodes = new Map<string, TopologyNode>();
+  const edges = new Map<string, TopologyEdge>();
+  const statuses = matchBoard(board, services);
+
+  for (const node of board.nodes) {
+    if (node.kind === 'service') {
+      const status = statuses.get(node.id) ?? { running: false, pids: [] };
+      nodes.set(node.id, {
+        id: node.id,
+        kind: status.running ? 'service' : 'offline',
+        label: node.name || node.cwd.split('/').filter(Boolean).pop() || node.id,
+        sub: node.port > 0 ? `:${node.port}` : node.endpoint,
+        managed: {
+          key: `board:${node.id}`,
+          name: node.name,
+          cwd: node.cwd,
+          buildCommand: node.buildCommand,
+          runCommand: node.runCommand,
+          envText: node.envText,
+        },
+        pids: status.pids,
+      });
+    } else {
+      nodes.set(node.id, {
+        id: node.id,
+        kind: node.kind,
+        label: node.name || node.endpoint,
+        sub: node.endpoint,
+      });
+    }
+  }
+
+  for (const edge of board.edges) {
+    if (!nodes.has(edge.source) || !nodes.has(edge.target)) continue;
+    const target = nodes.get(edge.target)!;
+    const label = target.sub.startsWith(':') ? target.sub : undefined;
+    addEdge(edges, edge.source, edge.target, 'runtime', label);
+  }
+
+  return { nodes: [...nodes.values()], edges: [...edges.values()] };
+}
+
+/**
  * 층위 기반 결정론적 레이아웃. 서비스 간 엣지로 층위를 계산하고(입장 노드가 0층),
  * DB·외부 노드는 자신으로 들어오는 엣지 출발지보다 한 층 아래에 놓는다.
  * 같은 층에서는 라벨 순으로 정렬해 널찍이 배치한다. 사용자가 끌어놓은 위치(positions)가 있으면 그것이 이긴다.
@@ -197,12 +248,14 @@ export function layoutTopology(
   }
 
   const tiers = new Map<string, number>();
+  // 배선의 층위를 만드는 것은 서비스 계열(실행 중/꺼짐 모두)이다. DB·외부는 언제나 하위다.
+  const isServiceKind = (id: string) => ['service', 'offline'].includes(nodeById.get(id)?.kind ?? '');
   function tierOf(id: string, seen: Set<string> = new Set()): number {
     const known = tiers.get(id);
     if (known !== undefined) return known;
     if (seen.has(id)) return 0;
     seen.add(id);
-    const parents = (inbound.get(id) ?? []).filter((parent) => nodeById.get(parent)?.kind === 'service');
+    const parents = (inbound.get(id) ?? []).filter((parent) => isServiceKind(parent));
     const tier = parents.length === 0 ? 0 : Math.max(...parents.map((parent) => tierOf(parent, seen) + 1));
     tiers.set(id, tier);
     return tier;

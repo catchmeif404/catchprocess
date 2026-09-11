@@ -27,6 +27,58 @@ pub struct ManagedService {
     pub env_text: String,
 }
 
+/// 구성도(보드)의 노드다. service는 켜고 끌 수 있는 로컬 서비스, database/external은
+/// 표시용 엔드포인트다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardNode {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub build_command: String,
+    #[serde(default)]
+    pub run_command: String,
+    #[serde(default)]
+    pub env_text: String,
+    /// 실행 상태 매칭에 쓰는 리슨 포트다. 비워 두면 cwd만으로 매칭한다.
+    #[serde(default)]
+    pub port: u16,
+    /// database/external 노드의 표시용 엔드포인트다 (예: `localhost:5432`).
+    #[serde(default)]
+    pub endpoint: String,
+}
+
+/// 보드 안의 배선이다. source/target은 BoardNode id다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardEdge {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+}
+
+/// 프로젝트별 구성도 판이다. 위젯은 이 보드가 진실이고, 감지는 설정을 돕는 조수다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Board {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_board_color")]
+    pub color: String,
+    #[serde(default)]
+    pub nodes: Vec<BoardNode>,
+    #[serde(default)]
+    pub edges: Vec<BoardEdge>,
+}
+
+fn default_board_color() -> String {
+    "ink".into()
+}
+
 /// One live scan of dev-relevant services; called on a 3s poll from the UI.
 #[tauri::command]
 pub fn get_services() -> Snapshot {
@@ -54,6 +106,27 @@ pub fn save_managed_services(services: Vec<ManagedService>) -> Result<(), String
     let text = serde_json::to_string_pretty(&services).map_err(|error| format!("failed to encode service config: {error}"))?;
     fs::write(&path, format!("{text}\n")).map_err(|error| format!("failed to write service config: {error}"))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_boards() -> Result<Vec<Board>, String> {
+    let path = boards_path()?;
+    if !path.exists() { return Ok(Vec::new()); }
+    let text = fs::read_to_string(&path).map_err(|error| format!("failed to read boards: {error}"))?;
+    serde_json::from_str(&text).map_err(|error| format!("invalid boards file: {error}"))
+}
+
+#[tauri::command]
+pub fn save_boards(boards: Vec<Board>) -> Result<(), String> {
+    let path = boards_path()?;
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|error| format!("failed to create config directory: {error}"))?; }
+    let text = serde_json::to_string_pretty(&boards).map_err(|error| format!("failed to encode boards: {error}"))?;
+    fs::write(&path, format!("{text}\n")).map_err(|error| format!("failed to write boards: {error}"))?;
+    Ok(())
+}
+
+fn boards_path() -> Result<PathBuf, String> {
+    managed_services_path().map(|path| path.with_file_name("boards.json"))
 }
 
 fn managed_services_path() -> Result<PathBuf, String> {
