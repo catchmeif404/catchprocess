@@ -153,7 +153,7 @@ pub fn scan() -> Snapshot {
             let command = process.cmd().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>().join(" ");
             service.framework = if command.contains("next-server") || command.contains("next/dist/") {
                 Some("nextjs".into())
-            } else if command.contains("spring-boot") || command.contains("org.springframework.boot") {
+            } else if command.contains("spring-boot") || command.contains("org.springframework.boot") || command.contains("springframework") {
                 Some("spring".into())
             } else { None };
             service.project = project::resolve(process.cwd());

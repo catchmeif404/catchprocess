@@ -110,7 +110,7 @@ fn extract_api_targets(text: &str) -> Vec<ApiTarget> {
         if trimmed.starts_with("/*") { in_comment = !trimmed.contains("*/"); continue; }
         if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') { continue; }
         let lowered = line.to_lowercase();
-        if !["api_base_url", "api_url", "baseurl", "fetch("].iter().any(|key| lowered.contains(key)) {
+        if !["api_base_url", "api_base", "api_url", "baseurl", "fetch("].iter().any(|key| lowered.contains(key)) {
             continue;
         }
         for marker in ["http://", "https://", "localhost:", "127.0.0.1:", "[::1]:"] {
@@ -136,13 +136,21 @@ fn extract_database_targets(text: &str) -> Vec<DatabaseTarget> {
         let rest = &line[start + 5..];
         let Some((engine, after_scheme)) = rest.split_once("://") else { continue; };
         let engine = engine.to_lowercase();
-        if !matches!(engine.as_str(), "postgresql" | "mysql" | "mariadb") { continue; }
+        if !matches!(engine.as_str(), "postgresql" | "mysql" | "mariadb" | "sqlserver") { continue; }
         let authority = after_scheme.split('/').next().unwrap_or_default();
         let port = authority
             .rsplit_once(':')
             .and_then(|(_, value)| value.split(['}', '?']).next()?.parse().ok())
-            .unwrap_or(if engine == "postgresql" { 5432 } else { 3306 });
-        let Some(database_part) = after_scheme.split('/').nth(1) else { continue; };
+            .unwrap_or(match engine.as_str() { "postgresql" => 5432, "sqlserver" => 1433, _ => 3306 });
+        let database_part = if engine == "sqlserver" {
+            after_scheme
+                .split(';')
+                .find_map(|part| part.strip_prefix("databaseName="))
+                .unwrap_or_default()
+        } else {
+            let Some(database) = after_scheme.split('/').nth(1) else { continue; };
+            database
+        };
         let database_part = database_part
             .split(['?', ' ', '"', '\'', '}'])
             .next()
@@ -161,8 +169,8 @@ fn extract_database_targets(text: &str) -> Vec<DatabaseTarget> {
     targets
 }
 
-/// Read only source-like files under shallow `src` directories. Values are reduced to local
-/// host/port pairs immediately; secrets and arbitrary file contents never enter ProjectInfo.
+/// Read only shallow source/config files. Values are reduced to host/port pairs immediately;
+/// secrets and arbitrary file contents never enter ProjectInfo.
 pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
     let mut files = Vec::new();
     let mut directories = vec![root.to_path_buf()];
@@ -179,7 +187,7 @@ pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
                 if !matches!(name, ".git" | "node_modules" | ".next" | "target" | "dist" | "build" | ".gradle") {
                     directories.push(path);
                 }
-            } else if files.len() < 200 && matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "properties" | "yml" | "yaml")) {
+            } else if files.len() < 200 && (path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == ".env" || name.starts_with(".env.")) || matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "properties" | "yml" | "yaml"))) {
                 files.push(path);
             }
         }
@@ -315,6 +323,12 @@ mod tests {
     fn extracts_external_api_default_https_port() {
         let targets = extract_api_targets("const API_BASE_URL = 'https://api.example.com';");
         assert_eq!(targets, vec![ApiTarget { host: "api.example.com".into(), port: 443 }]);
+    }
+
+    #[test]
+    fn extracts_api_base_from_env_without_retaining_the_value() {
+        let targets = extract_api_targets("API_BASE=http://localhost:8080\nSECRET_TOKEN=not-a-url");
+        assert_eq!(targets, vec![ApiTarget { host: "localhost".into(), port: 8080 }]);
     }
 
     #[test]
