@@ -13,5 +13,8 @@ export function serviceLabel(service: Service): string {
 export function apiLabel(target: ApiTarget, source: Service, services: Service[]): string {
   const loopback = ['localhost', '127.0.0.1', '::1'].includes(target.host);
   const matches = loopback ? services.filter(s => s.pid !== source.pid && s.ports.includes(target.port)) : [];
-  return matches.length === 1 ? serviceLabel(matches[0]) : target.host;
+  if (matches.length !== 1) return target.host;
+  const targetService = matches[0];
+  const projectName = targetService.project?.name;
+  return projectName ? `${projectName} · ${serviceLabel(targetService)}` : serviceLabel(targetService);
 }
