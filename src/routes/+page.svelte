@@ -381,61 +381,65 @@
   {#if failed}
     <p class="status error" role="alert">{t('scanFailed')}</p>
   {:else if preferences.view === 'map'}
-    {#if boards.length === 0}
-      <p class="status">{t('emptyBoard')}</p>
-    {/if}
-    {#if activeBoard}
-      <div class="board-tabs" role="tablist" aria-label="boards">
-        {#each boards as board (board.id)}
-          <button role="tab" aria-selected={board.id === activeBoardId} class:active={board.id === activeBoardId} onclick={() => { activeBoardId = board.id; selectedNodeId = null; connectMode = false; connectSource = null; }}>{board.name}</button>
-        {/each}
-        <button class="board-new" onclick={createBoard}>{t('newBoard')}</button>
-      </div>
-      <div class="board-bar">
+    <div class="board-bar">
+      {#if boards.length > 0}
+        <select
+          class="board-select"
+          bind:value={activeBoardId}
+          aria-label="board"
+          onchange={() => { selectedNodeId = null; connectMode = false; connectSource = null; nodeError = ''; preferences.activeBoardId = activeBoardId; saveView(); }}
+        >
+          {#each boards as board (board.id)}
+            <option value={board.id}>{board.name}</option>
+          {/each}
+        </select>
+      {/if}
+      <button onclick={createBoard}>{t('newBoard')}</button>
+      {#if activeBoard}
+        <span class="spacer"></span>
         <button disabled={nodeBusy !== null} onclick={() => void startAll()}>{nodeBusy === 'all' ? t('working') : t('startAll')}</button>
         <button disabled={nodeBusy !== null} onclick={() => void stopAll()}>{nodeBusy === 'all' ? t('working') : t('stopAll')}</button>
-        <span class="spacer"></span>
         <button class:wiring={connectMode} onclick={() => { connectMode = !connectMode; connectSource = null; selectedNodeId = null; }}>{connectMode ? (connectSource ? t('to') : t('from')) : t('connect')}</button>
         <button onclick={() => editingNode = newNode('service')}>{t('addNode')}</button>
         <button onclick={deleteBoard}>{t('deleteBoard')}</button>
+      {/if}
+    </div>
+    {#if nodeError}<p class="panel-error" role="alert">{nodeError}</p>{/if}
+    {#if !activeBoard || activeBoard.nodes.length === 0}
+      <p class="status">{t('emptyBoard')}</p>
+    {:else}
+      <div class="map-wrap">
+        <TopologyCanvas
+          nodes={laidOut.nodes}
+          edges={boardTopology.edges}
+          width={CANVAS_WIDTH}
+          height={laidOut.height}
+          selectedId={connectMode ? connectSource : selectedNodeId}
+          onselect={handleCanvasSelect}
+          onnodemove={saveNodePosition}
+        />
       </div>
-      {#if nodeError}<p class="panel-error" role="alert">{nodeError}</p>{/if}
-      {#if activeBoard.nodes.length === 0}
-        <p class="status">{t('emptyBoard')}</p>
-      {:else}
-        <div class="map-wrap">
-          <TopologyCanvas
-            nodes={laidOut.nodes}
-            edges={boardTopology.edges}
-            width={CANVAS_WIDTH}
-            height={laidOut.height}
-            selectedId={connectMode ? connectSource : selectedNodeId}
-            onselect={handleCanvasSelect}
-            onnodemove={saveNodePosition}
-          />
-        </div>
-        {#if connectMode}
-          <p class="status">{connectSource ? t('to') : t('from')}</p>
-        {/if}
-        {#if selectedNode && selectedBoardNode}
-          <div class="node-strip" role="region" aria-label={selectedNode.label}>
-            <div class="strip-head">
-              <strong>{selectedNode.label}</strong>
-              <span class="strip-sub">{selectedNode.sub}{selectedNode.pids?.length ? ` · pid ${selectedNode.pids.join(', ')}` : ''}</span>
-              <span class="run-state" class:down={selectedNode.kind === 'offline'}>{selectedNode.kind === 'offline' ? t('statusDown') : t('statusUp', { pids: selectedNode.pids?.join(', ') ?? '' })}</span>
-              <button class="strip-close" onclick={() => selectedNodeId = null}>×</button>
-            </div>
-            <div class="strip-actions">
-              {#if selectedNode.kind === 'offline'}
-                <button disabled={nodeBusy !== null || !selectedBoardNode.runCommand} onclick={() => void startBoardNode(selectedBoardNode)}>{nodeBusy === selectedBoardNode.id ? t('working') : t('start')}</button>
-              {:else if selectedNode.pids?.length}
-                <button disabled={nodeBusy !== null} onclick={() => void stopSelected()}>{nodeBusy === selectedBoardNode.id ? t('stopping') : t('stop')}</button>
-              {/if}
-              <button onclick={() => editingNode = { ...selectedBoardNode }}>{t('configure')}</button>
-              <button onclick={() => removeNode(selectedBoardNode.id)}>{t('removeNode')}</button>
-            </div>
+      {#if connectMode}
+        <p class="status">{connectSource ? t('to') : t('from')}</p>
+      {/if}
+      {#if selectedNode && selectedBoardNode}
+        <div class="node-strip" role="region" aria-label={selectedNode.label}>
+          <div class="strip-head">
+            <strong>{selectedNode.label}</strong>
+            <span class="strip-sub">{selectedNode.sub}{selectedNode.pids?.length ? ` · pid ${selectedNode.pids.join(', ')}` : ''}</span>
+            <span class="run-state" class:down={selectedNode.kind === 'offline'}>{selectedNode.kind === 'offline' ? t('statusDown') : t('statusUp', { pids: selectedNode.pids?.join(', ') ?? '' })}</span>
+            <button class="strip-close" onclick={() => selectedNodeId = null}>×</button>
           </div>
-        {/if}
+          <div class="strip-actions">
+            {#if selectedNode.kind === 'offline'}
+              <button disabled={nodeBusy !== null || !selectedBoardNode.runCommand} onclick={() => void startBoardNode(selectedBoardNode)}>{nodeBusy === selectedBoardNode.id ? t('working') : t('start')}</button>
+            {:else if selectedNode.pids?.length}
+              <button disabled={nodeBusy !== null} onclick={() => void stopSelected()}>{nodeBusy === selectedBoardNode.id ? t('stopping') : t('stop')}</button>
+            {/if}
+            <button onclick={() => editingNode = { ...selectedBoardNode }}>{t('configure')}</button>
+            <button onclick={() => removeNode(selectedBoardNode.id)}>{t('removeNode')}</button>
+          </div>
+        </div>
       {/if}
       {#if activeBoard.edges.length > 0}
         <details class="wires">
@@ -709,11 +713,8 @@
   .view-toggle button { border-radius: 0; }
   .view-toggle button.active { background: var(--ink); color: var(--paper); }
   .map-wrap { overflow: auto; border-radius: 6px; }
-  .board-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-  .board-tabs button { border: 1px solid #241f1a1a; }
-  .board-tabs button.active { background: var(--ink); color: var(--paper); }
-  .board-tabs .board-new { border-style: dashed; color: var(--ink-muted); }
-  .board-bar { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  .board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0; }
+  .board-select { flex: none; max-width: 200px; padding: 5px 7px; border: 1px solid #241f1a33; border-radius: 4px; background: var(--paper-card); color: var(--ink); font: 12px system-ui; }
   .board-bar .spacer { flex: 1; }
   .board-bar .wiring { border-color: var(--stamp); color: var(--stamp); }
   .wires { margin-top: 6px; font: 12px system-ui; color: var(--ink-muted); }
