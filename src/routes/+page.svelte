@@ -315,11 +315,13 @@
     gap: 0.35rem;
     padding: 0.2rem 0.45rem;
     border-bottom: 1px dashed rgba(36, 31, 26, 0.35);
+    background: var(--paper);
     color: var(--ink);
     font-family: var(--serif-stamp);
     font-size: 0.78rem;
     font-weight: 700;
     text-transform: uppercase;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
   }
 
   .branch {
@@ -334,7 +336,9 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.2rem 0.45rem;
-    padding: 0 0.45rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid rgba(36, 31, 26, 0.2);
+    background: var(--paper-card);
     color: var(--stamp);
     font-size: 0.64rem;
   }
