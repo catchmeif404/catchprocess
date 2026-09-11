@@ -154,16 +154,11 @@ pub fn scan() -> Snapshot {
         }
     }
 
-    // Several processes can belong to one repository. Discover API targets once per project
-    // root, then copy the redacted host/port pairs into each service's project metadata.
-    let mut api_cache = std::collections::HashMap::new();
     for service in &mut services {
-        if let Some(project) = service.project.as_mut() {
-            let targets = api_cache
-                .entry(project.path.clone())
-                .or_insert_with(|| project::discover_api_targets(std::path::Path::new(&project.path)))
-                .clone();
-            project.api_targets = targets;
+        if let Some(process) = system.process(Pid::from_u32(service.pid)) {
+            if let Some(cwd) = process.cwd() {
+                service.api_targets = project::discover_api_targets(cwd);
+            }
         }
     }
 

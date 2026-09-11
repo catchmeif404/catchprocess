@@ -23,9 +23,6 @@ pub struct ProjectInfo {
     /// git 저장소가 아닐 경우 생략된다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
-    /// API endpoints discovered from source/config context without reading secret values.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub api_targets: Vec<ApiTarget>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -185,7 +182,6 @@ pub fn resolve(cwd: Option<&Path>) -> Option<ProjectInfo> {
                         name: derive_name(&path),
                         path: toplevel,
                         branch: Some(branch),
-                        api_targets: Vec::new(),
                     });
                 }
             }
@@ -196,7 +192,6 @@ pub fn resolve(cwd: Option<&Path>) -> Option<ProjectInfo> {
         name: derive_name(cwd),
         path: cwd.to_string_lossy().to_string(),
         branch: None,
-        api_targets: Vec::new(),
     })
 }
 

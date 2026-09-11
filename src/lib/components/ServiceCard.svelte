@@ -38,6 +38,7 @@
     }),
   );
   const connections = $derived(service.connections ?? []);
+  const apiTargets = $derived(service.apiTargets ?? []);
 
   function handleStopClick(): void {
     if (stopping) return;
@@ -81,6 +82,13 @@
       <span class="connection-label">{t('connections')}</span>
       {#each connections as connection}
         <span class="connection">{t('connectedTo', { target: connection.target, port: connection.port })}</span>
+      {/each}
+    </div>
+  {/if}
+  {#if apiTargets.length > 0}
+    <div class="connections api-targets">
+      {#each apiTargets as target}
+        <span class="connection">{t('apiTarget', { host: target.host, port: target.port })}</span>
       {/each}
     </div>
   {/if}
@@ -181,6 +189,13 @@
     padding-left: 1.15rem;
     color: var(--ink-muted);
     font-size: 0.64rem;
+  }
+
+  .api-targets {
+    padding: 0.2rem 0.45rem;
+    border: 1px solid rgba(36, 31, 26, 0.2);
+    background: var(--paper-card);
+    color: var(--stamp);
   }
 
   .connection-label {

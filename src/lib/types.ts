@@ -9,8 +9,6 @@ export interface ProjectInfo {
   path: string;
   /** git 저장소가 아닐 경우 필드 자체가 없다. */
   branch?: string;
-  /** source-discovered local API endpoints, reduced to host/port only. */
-  apiTargets?: ApiTarget[];
 }
 
 export interface ApiTarget {
@@ -31,6 +29,8 @@ export interface Service {
   project?: ProjectInfo;
   /** 현재 관찰된 outbound TCP 연결. */
   connections?: Connection[];
+  /** source-discovered API endpoints for this process's working directory. */
+  apiTargets?: ApiTarget[];
 }
 
 export interface Connection {

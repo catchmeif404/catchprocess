@@ -8,13 +8,12 @@
   import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
-  import type { ApiTarget, Service, Snapshot } from '$lib/types';
+  import type { Service, Snapshot } from '$lib/types';
 
   interface ProjectGroup {
     key: string;
     name: string;
     branch?: string;
-    apiTargets: ApiTarget[];
     services: Service[];
   }
 
@@ -27,7 +26,6 @@
         key,
         name: project?.name ?? 'unassigned',
         branch: project?.branch,
-        apiTargets: project?.apiTargets ?? [],
         services: [],
       };
       group.services.push(service);
@@ -142,13 +140,6 @@
             <span class="project-name">{group.name}</span>
             {#if group.branch}<span class="branch">· {group.branch}</span>{/if}
           </div>
-          {#if group.apiTargets.length > 0}
-            <div class="api-targets">
-              {#each group.apiTargets as target}
-                <span>{t('apiTarget', { host: target.host, port: target.port })}</span>
-              {/each}
-            </div>
-          {/if}
           <ul class="list" use:dragScroll>
             {#each group.services as service (service.pid)}
               <ServiceCard {service} {onstop} />
@@ -330,17 +321,6 @@
     font-size: 0.64rem;
     font-weight: 400;
     text-transform: none;
-  }
-
-  .api-targets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.2rem 0.45rem;
-    padding: 0.2rem 0.45rem;
-    border: 1px solid rgba(36, 31, 26, 0.2);
-    background: var(--paper-card);
-    color: var(--stamp);
-    font-size: 0.64rem;
   }
 
   .list::-webkit-scrollbar {
