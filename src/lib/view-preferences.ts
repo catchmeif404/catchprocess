@@ -12,7 +12,9 @@ export interface ManagedService {
 export const preferenceKey = 'devtopology.view.v1';
 export const serviceConfigKey = 'devtopology.services.v1';
 export function serviceKey(service: Service): string {
-  return JSON.stringify([service.project?.path ?? '', service.process, [...service.ports].sort((a,b) => a-b)]);
+  // Executable names vary by runner (e.g. node vs next-server). Project + ports identifies the
+  // local service more reliably across restarts and dev-server implementations.
+  return JSON.stringify([service.project?.path ?? '', [...service.ports].sort((a,b) => a-b)]);
 }
 export function readPreferences(): ViewPreferences {
   try {
