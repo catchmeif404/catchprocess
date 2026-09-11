@@ -39,7 +39,7 @@
     for (const target of service.apiTargets ?? []) {
       const localService = group.services.find((candidate) => candidate.ports.includes(target.port));
       if (localService) {
-        labels[target.port] = localService.project?.name ?? localService.process;
+        labels[target.port] = localService.process;
       }
     }
     return labels;
@@ -153,7 +153,12 @@
           </div>
           <ul class="list" use:dragScroll>
             {#each group.services as service (service.pid)}
-              <ServiceCard {service} {onstop} apiTargetLabels={apiTargetLabels(service, group)} />
+              <ServiceCard
+                {service}
+                {onstop}
+                compact
+                apiTargetLabels={apiTargetLabels(service, group)}
+              />
             {/each}
           </ul>
         </section>

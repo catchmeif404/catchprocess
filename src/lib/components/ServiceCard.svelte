@@ -15,23 +15,27 @@
     onstop?: (pid: number) => void;
     /** 같은 프로젝트 그룹에서 해석한 API 대상 표시명. */
     apiTargetLabels?: Record<number, string>;
+    /** 프로젝트명이 부모 그룹에 이미 표시될 때 카드 정보를 압축한다. */
+    compact?: boolean;
   }
 
-  let { service, onstop, apiTargetLabels = {} }: Props = $props();
+  let { service, onstop, apiTargetLabels = {}, compact = false }: Props = $props();
 
   let stopping = $state(false);
   let failed = $state(false);
 
   // 파생 값: ":5173 :8080" 형태의 포트 라벨.
   const portLabel = $derived(service.ports.map((port) => `:${port}`).join(' '));
-  const title = $derived(service.project?.name ?? service.process);
+  const title = $derived(compact ? service.process : service.project?.name ?? service.process);
   const branch = $derived(service.project?.branch);
   const metaParts = $derived(
     failed
       ? [t('stopFailed')]
       : stopping
         ? [t('stopping')]
-        : [service.process, `#${service.pid}`, ...(branch ? [branch] : [])],
+        : compact
+          ? [`#${service.pid}`, ...(branch ? [branch] : [])]
+          : [service.process, `#${service.pid}`, ...(branch ? [branch] : [])],
   );
   const ariaLabel = $derived(
     t('cardAria', {
