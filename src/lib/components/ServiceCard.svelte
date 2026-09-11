@@ -19,9 +19,10 @@
     /** 프로젝트명이 부모 그룹에 이미 표시될 때 카드 정보를 압축한다. */
     compact?: boolean;
     onhide?: () => void;
+    onconfigure?: () => void;
   }
 
-  let { service, onstop, onhide, apiTargetLabels = {}, compact = false }: Props = $props();
+  let { service, onstop, onhide, onconfigure, apiTargetLabels = {}, compact = false }: Props = $props();
   let confirming = $state(false);
 
   let stopping = $state(false);
@@ -78,6 +79,7 @@
     <span class="name">{title}</span>
     <span class="ports">{portLabel}</span>
     {#if onhide}<button class="hide" title={t('hide')} aria-label={t('hide')} onclick={onhide}>−</button>{/if}
+    {#if onconfigure}<button class="configure" title={t('configure')} aria-label={t('configure')} onclick={onconfigure}>⚙</button>{/if}
     <button
       class="stop"
       class:stopping

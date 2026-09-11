@@ -34,6 +34,7 @@ export interface Service {
   apiTargets?: ApiTarget[];
   /** source-discovered database targets for this process's working directory. */
   databaseTargets?: DatabaseTarget[];
+  configKey?: string;
 }
 
 export interface Connection {

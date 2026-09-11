@@ -5,16 +5,35 @@
   import { SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
+  import ServiceSettings from '$lib/components/ServiceSettings.svelte';
   import { apiLabel } from '$lib/service-presentation';
   import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
   import type { Service, Snapshot } from '$lib/types';
-  import { readPreferences, preferenceKey, serviceKey } from '$lib/view-preferences';
+  import { readManagedServices, readPreferences, preferenceKey, serviceConfigKey, serviceKey, type ManagedService } from '$lib/view-preferences';
   let preferences = $state(readPreferences());
+  let managedServices = $state(readManagedServices());
+  let selectedConfig = $state<ManagedService | null>(null);
   let showHidden = $state(false);
   function saveView() {
     try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch { /* Session state still works. */ }
+  }
+  function openSettings(service: Service) {
+    const key = serviceKey(service);
+    selectedConfig = managedServices.find(item => item.key === key) ?? {
+      key,
+      name: service.project?.name ? `${service.project.name} ${service.process}` : service.process,
+      cwd: service.project?.path ?? '',
+      buildCommand: '',
+      runCommand: '',
+      envText: '',
+    };
+  }
+  function saveServiceConfig(config: ManagedService) {
+    managedServices = [...managedServices.filter(item => item.key !== config.key), config];
+    try { localStorage.setItem(serviceConfigKey, JSON.stringify(managedServices)); } catch { /* Keep the current session usable. */ }
+    selectedConfig = null;
   }
   function hideService(service: Service) {
     preferences.hidden = [...new Set([...preferences.hidden, serviceKey(service)])];
@@ -208,6 +227,7 @@
                 {service}
                 {onstop}
                 onhide={() => hideService(service)}
+                onconfigure={() => openSettings(service)}
                 compact
                 apiTargetLabels={apiTargetLabels(service)}
               />
@@ -222,6 +242,10 @@
     {/if}
   {/if}
 </div>
+
+{#if selectedConfig}
+  <ServiceSettings config={selectedConfig} onsave={saveServiceConfig} onclose={() => selectedConfig = null} />
+{/if}
 
 <style>
   /* 외곽 박스 없음: 창 자체가 투명하고, 종이 카드들과 작은 종이 조각만 떠 있다.
