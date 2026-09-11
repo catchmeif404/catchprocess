@@ -53,6 +53,33 @@ fn shell_command(command: &str) -> Command {
     shell
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_forwards_environment_and_working_directory() {
+        let cwd = std::env::temp_dir();
+        let result = build_service(ProcessCommandRequest {
+            command: "printf '%s|%s' \"$DEVTOPOLOGY_TEST_VALUE\" \"$PWD\"".into(),
+            cwd: cwd.to_string_lossy().into_owned(),
+            env: HashMap::from([(String::from("DEVTOPOLOGY_TEST_VALUE"), String::from("sample-value"))]),
+        }).expect("build command should succeed");
+        let expected_cwd = cwd.canonicalize().expect("temp directory should resolve");
+        assert_eq!(result, format!("sample-value|{}", expected_cwd.display()));
+    }
+
+    #[test]
+    fn start_spawns_a_configured_command() {
+        let pid = start_service(ProcessCommandRequest {
+            command: "test \"$DEVTOPOLOGY_TEST_VALUE\" = sample-value".into(),
+            cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+            env: HashMap::from([(String::from("DEVTOPOLOGY_TEST_VALUE"), String::from("sample-value"))]),
+        }).expect("start command should spawn");
+        assert!(pid > 0);
+    }
+}
+
 #[cfg(windows)]
 fn shell_command(command: &str) -> Command {
     let mut shell = Command::new("cmd");
