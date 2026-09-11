@@ -8,7 +8,33 @@
   import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
-  import type { Snapshot } from '$lib/types';
+  import type { ApiTarget, Service, Snapshot } from '$lib/types';
+
+  interface ProjectGroup {
+    key: string;
+    name: string;
+    branch?: string;
+    apiTargets: ApiTarget[];
+    services: Service[];
+  }
+
+  function groupServices(items: Service[]): ProjectGroup[] {
+    const groups = new Map<string, ProjectGroup>();
+    for (const service of items) {
+      const project = service.project;
+      const key = project?.path ?? `unassigned:${service.pid}`;
+      const group = groups.get(key) ?? {
+        key,
+        name: project?.name ?? 'unassigned',
+        branch: project?.branch,
+        apiTargets: project?.apiTargets ?? [],
+        services: [],
+      };
+      group.services.push(service);
+      groups.set(key, group);
+    }
+    return [...groups.values()];
+  }
 
   let snapshot = $state<Snapshot | null>(null);
   let failed = $state(false);
@@ -16,6 +42,7 @@
 
   const services = $derived(snapshot?.services ?? []);
   const visibleServices = $derived(filterServices(services, query));
+  const projectGroups = $derived(groupServices(visibleServices));
   const serviceCount = $derived(services.length);
   const updatedAt = $derived(
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
@@ -108,11 +135,28 @@
   {:else if visibleServices.length === 0}
     <p class="status">{t('noMatches')}</p>
   {:else}
-    <ul class="list" use:dragScroll>
-      {#each visibleServices as service (service.pid)}
-        <ServiceCard {service} {onstop} />
+    <div class="groups">
+      {#each projectGroups as group (group.key)}
+        <section class="project-group" aria-label={group.name}>
+          <div class="project-header">
+            <span class="project-name">{group.name}</span>
+            {#if group.branch}<span class="branch">· {group.branch}</span>{/if}
+          </div>
+          {#if group.apiTargets.length > 0}
+            <div class="api-targets">
+              {#each group.apiTargets as target}
+                <span>{t('apiTarget', { host: target.host, port: target.port })}</span>
+              {/each}
+            </div>
+          {/if}
+          <ul class="list" use:dragScroll>
+            {#each group.services as service (service.pid)}
+              <ServiceCard {service} {onstop} />
+            {/each}
+          </ul>
+        </section>
       {/each}
-    </ul>
+    </div>
     {#if updatedAt}
       <p class="status">{t('updatedAt', { time: updatedAt })}</p>
     {/if}
@@ -244,6 +288,55 @@
     scrollbar-width: none;
     /* 드래그 스크롤 중 텍스트 선택 방지 */
     user-select: none;
+  }
+
+  .groups {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .groups::-webkit-scrollbar {
+    display: none;
+  }
+
+  .project-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .project-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.2rem 0.45rem;
+    border-bottom: 1px dashed rgba(36, 31, 26, 0.35);
+    color: var(--ink);
+    font-family: var(--serif-stamp);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .branch {
+    color: var(--ink-muted);
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    font-weight: 400;
+    text-transform: none;
+  }
+
+  .api-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.45rem;
+    padding: 0 0.45rem;
+    color: var(--stamp);
+    font-size: 0.64rem;
   }
 
   .list::-webkit-scrollbar {

@@ -23,6 +23,7 @@ export const MESSAGES = {
     stopFailed: 'stop failed',
     connections: 'connections',
     connectedTo: '→ {target}:{port}',
+    apiTarget: 'API → {host}:{port}',
   },
   ko: {
     title: 'DevTopology',
@@ -42,6 +43,7 @@ export const MESSAGES = {
     stopFailed: '중지 실패',
     connections: '연결',
     connectedTo: '→ {target}:{port}',
+    apiTarget: 'API → {host}:{port}',
   },
 } as const;
 

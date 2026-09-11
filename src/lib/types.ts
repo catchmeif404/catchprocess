@@ -9,6 +9,13 @@ export interface ProjectInfo {
   path: string;
   /** git 저장소가 아닐 경우 필드 자체가 없다. */
   branch?: string;
+  /** source-discovered local API endpoints, reduced to host/port only. */
+  apiTargets?: ApiTarget[];
+}
+
+export interface ApiTarget {
+  host: string;
+  port: number;
 }
 
 /** 프로세스 1개가 리슨 중인 서비스 카드 정보. */

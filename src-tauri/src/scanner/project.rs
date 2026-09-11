@@ -5,6 +5,8 @@
 //!
 //! git 호출은 이 모듈의 가장자리에만 존재하고, 파싱/이름 도출은 순수 함수로 유닛 테스트한다.
 
+use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
 
@@ -21,6 +23,16 @@ pub struct ProjectInfo {
     /// git 저장소가 아닐 경우 생략된다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// API endpoints discovered from source/config context without reading secret values.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub api_targets: Vec<ApiTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiTarget {
+    pub host: String,
+    pub port: u16,
 }
 
 /// 경로의 마지막 구성 요소(폴더명)를 반환한다. 루트/빈 경로는 "unknown".
@@ -57,6 +69,88 @@ pub fn is_homebrew_root(path: &Path) -> bool {
     )
 }
 
+fn api_target_from_token(token: &str) -> Option<ApiTarget> {
+    let token = token.trim_matches(|character: char| {
+        matches!(character, '"' | '\'' | '`' | ')' | '}' | ']' | ',' | ';')
+    });
+    let authority = token
+        .strip_prefix("http://")
+        .or_else(|| token.strip_prefix("https://"))
+        .unwrap_or(token)
+        .split('/').next()?;
+    let authority = authority.split('?').next()?.split('#').next()?;
+    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
+        let (host, port) = rest.split_once("]:" )?;
+        (host.to_string(), port.parse().ok()?)
+    } else {
+        let (host, port) = authority.rsplit_once(':')?;
+        (host.to_string(), port.parse().ok()?)
+    };
+    if host.is_empty() || port == 0 { return None; }
+    let is_local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+        || host.parse::<IpAddr>().is_ok_and(|address| match address {
+            IpAddr::V4(address) => address.is_private() || address.is_loopback(),
+            IpAddr::V6(address) => address.is_loopback() || address.is_unique_local(),
+        });
+    if !is_local { return None; }
+    Some(ApiTarget { host, port })
+}
+
+fn extract_api_targets(text: &str) -> Vec<ApiTarget> {
+    let mut targets = Vec::new();
+    for line in text.lines() {
+        let lowered = line.to_lowercase();
+        if !lowered.contains("api") && !lowered.contains("baseurl") && !lowered.contains("fetch(") {
+            continue;
+        }
+        for marker in ["http://", "https://", "localhost:", "127.0.0.1:", "[::1]:"] {
+            let mut offset = 0;
+            while let Some(found) = line[offset..].find(marker) {
+                let start = offset + found;
+                let token = &line[start..];
+                if let Some(target) = api_target_from_token(token) {
+                    if !targets.contains(&target) { targets.push(target); }
+                }
+                offset = start + marker.len();
+            }
+        }
+    }
+    targets
+}
+
+/// Read only source-like files under shallow `src` directories. Values are reduced to local
+/// host/port pairs immediately; secrets and arbitrary file contents never enter ProjectInfo.
+pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
+    let mut files = Vec::new();
+    let mut directories = vec![root.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        let depth = directory.strip_prefix(root).map(|path| path.components().count()).unwrap_or(99);
+        if depth > 4 { continue; }
+        let Ok(entries) = fs::read_dir(&directory) else { continue; };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            if path.is_dir() {
+                if !matches!(name, ".git" | "node_modules" | ".next" | "target" | "dist" | "build" | ".gradle") {
+                    directories.push(path);
+                }
+            } else if files.len() < 200 && matches!(path.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs")) {
+                files.push(path);
+            }
+        }
+    }
+    let mut targets = Vec::new();
+    for file in files {
+        let Ok(text) = fs::read_to_string(file) else { continue; };
+        let text = text.chars().take(512 * 1024).collect::<String>();
+        for target in extract_api_targets(&text) {
+            if !targets.contains(&target) { targets.push(target); }
+        }
+    }
+    targets.sort_by(|left, right| left.port.cmp(&right.port).then(left.host.cmp(&right.host)));
+    targets
+}
+
 /// `git rev-parse --show-toplevel --abbrev-ref HEAD` 출력을 파싱한다.
 /// 첫 줄은 저장소 루트, 둘째 줄은 브랜치 이름.
 pub fn parse_git_output(output: &str) -> Option<(String, String)> {
@@ -91,6 +185,7 @@ pub fn resolve(cwd: Option<&Path>) -> Option<ProjectInfo> {
                         name: derive_name(&path),
                         path: toplevel,
                         branch: Some(branch),
+                        api_targets: Vec::new(),
                     });
                 }
             }
@@ -101,6 +196,7 @@ pub fn resolve(cwd: Option<&Path>) -> Option<ProjectInfo> {
         name: derive_name(cwd),
         path: cwd.to_string_lossy().to_string(),
         branch: None,
+        api_targets: Vec::new(),
     })
 }
 
@@ -130,6 +226,14 @@ mod tests {
         assert!(is_homebrew_root(Path::new("/opt/homebrew")));
         assert!(is_homebrew_root(Path::new("/usr/local/Homebrew")));
         assert!(!is_homebrew_root(Path::new("/Users/k/projects/homebrew-app")));
+    }
+
+    #[test]
+    fn extracts_local_api_target_without_external_urls() {
+        let targets = extract_api_targets(
+            "const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';\nconst SITE_URL = 'https://example.com';",
+        );
+        assert_eq!(targets, vec![ApiTarget { host: "localhost".into(), port: 8080 }]);
     }
 
     #[test]
