@@ -87,7 +87,12 @@
     <div class="connections">
       <span class="connection-label">{t('connections')}</span>
       {#each connections as connection}
-        <span class="connection">{t('connectedTo', { target: connection.target, port: connection.port })}</span>
+        <span class:local={connection.local} class="connection">
+          <span class="connection-scope">
+            {connection.local ? t('localConnection') : t('externalConnection')}
+          </span>
+          {t('connectedTo', { target: connection.target, port: connection.port })}
+        </span>
       {/each}
     </div>
   {/if}
@@ -208,5 +213,16 @@
     color: var(--stamp);
     font-weight: 700;
     text-transform: uppercase;
+  }
+
+  .connection-scope {
+    color: var(--ink-muted);
+    font-size: 0.58rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .connection.local .connection-scope {
+    color: var(--stamp);
   }
 </style>

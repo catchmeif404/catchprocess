@@ -23,6 +23,8 @@ export const MESSAGES = {
     stopFailed: 'stop failed',
     connections: 'connections',
     connectedTo: '→ {target}:{port}',
+    localConnection: 'local',
+    externalConnection: 'remote',
     apiTarget: 'API → {target}:{port}',
   },
   ko: {
@@ -43,6 +45,8 @@ export const MESSAGES = {
     stopFailed: '중지 실패',
     connections: '연결',
     connectedTo: '→ {target}:{port}',
+    localConnection: '로컬',
+    externalConnection: '외부',
     apiTarget: 'API → {target}:{port}',
   },
 } as const;
