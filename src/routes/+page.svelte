@@ -34,6 +34,17 @@
     return [...groups.values()];
   }
 
+  function apiTargetLabels(service: Service, group: ProjectGroup): Record<number, string> {
+    const labels: Record<number, string> = {};
+    for (const target of service.apiTargets ?? []) {
+      const localService = group.services.find((candidate) => candidate.ports.includes(target.port));
+      if (localService) {
+        labels[target.port] = localService.project?.name ?? localService.process;
+      }
+    }
+    return labels;
+  }
+
   let snapshot = $state<Snapshot | null>(null);
   let failed = $state(false);
   let query = $state('');
@@ -142,7 +153,7 @@
           </div>
           <ul class="list" use:dragScroll>
             {#each group.services as service (service.pid)}
-              <ServiceCard {service} {onstop} />
+              <ServiceCard {service} {onstop} apiTargetLabels={apiTargetLabels(service, group)} />
             {/each}
           </ul>
         </section>

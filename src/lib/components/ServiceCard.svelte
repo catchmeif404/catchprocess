@@ -13,9 +13,11 @@
     service: Service;
     /** 중지 신호 전송 성공 후 호출된다 — 페이지가 즉시 재스캔한다. */
     onstop?: (pid: number) => void;
+    /** 같은 프로젝트 그룹에서 해석한 API 대상 표시명. */
+    apiTargetLabels?: Record<number, string>;
   }
 
-  let { service, onstop }: Props = $props();
+  let { service, onstop, apiTargetLabels = {} }: Props = $props();
 
   let stopping = $state(false);
   let failed = $state(false);
@@ -88,7 +90,7 @@
   {#if apiTargets.length > 0}
     <div class="connections api-targets">
       {#each apiTargets as target}
-        <span class="connection">{t('apiTarget', { host: target.host, port: target.port })}</span>
+        <span class="connection">{t('apiTarget', { target: apiTargetLabels[target.port] ?? target.host, port: target.port })}</span>
       {/each}
     </div>
   {/if}
