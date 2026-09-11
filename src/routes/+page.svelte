@@ -15,6 +15,9 @@
   let preferences = $state(readPreferences());
   let managedServices = $state(readManagedServices());
   let selectedConfig = $state<ManagedService | null>(null);
+  $effect(() => {
+    if (typeof window !== 'undefined') managedServices = readManagedServices();
+  });
   let showHidden = $state(false);
   let showConfigured = $state(false);
   function saveView() {
