@@ -18,6 +18,7 @@ export interface ApiTarget {
 
 /** 프로세스 1개가 리슨 중인 서비스 카드 정보. */
 export interface Service {
+  framework?: string;
   pid: number;
   /** 소문자 실행 파일 이름 (Windows `.exe` 접미사 제거됨). */
   process: string;

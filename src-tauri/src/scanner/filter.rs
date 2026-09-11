@@ -42,6 +42,8 @@ pub struct ConnectionRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Service {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub framework: Option<String>,
     pub pid: u32,
     pub process: String,
     /// All listening ports of this pid, deduplicated and sorted ascending.
@@ -138,6 +140,7 @@ pub fn filter_services(
                 .map(|n| (*n).to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             Service {
+                framework: None,
                 pid,
                 process: name,
                 ports,

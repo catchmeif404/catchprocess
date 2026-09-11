@@ -8,25 +8,28 @@
   import type { Service } from '$lib/types';
   import { t } from '$lib/i18n.svelte';
   import { stopService } from '$lib/api';
+  import { serviceLabel } from '$lib/service-presentation';
 
   interface Props {
     service: Service;
     /** 중지 신호 전송 성공 후 호출된다 — 페이지가 즉시 재스캔한다. */
     onstop?: (pid: number) => void;
     /** 같은 프로젝트 그룹에서 해석한 API 대상 표시명. */
-    apiTargetLabels?: Record<number, string>;
+    apiTargetLabels?: Record<string, string>;
     /** 프로젝트명이 부모 그룹에 이미 표시될 때 카드 정보를 압축한다. */
     compact?: boolean;
+    onhide?: () => void;
   }
 
-  let { service, onstop, apiTargetLabels = {}, compact = false }: Props = $props();
+  let { service, onstop, onhide, apiTargetLabels = {}, compact = false }: Props = $props();
+  let confirming = $state(false);
 
   let stopping = $state(false);
   let failed = $state(false);
 
   // 파생 값: ":5173 :8080" 형태의 포트 라벨.
   const portLabel = $derived(service.ports.map((port) => `:${port}`).join(' '));
-  const title = $derived(compact ? service.process : service.project?.name ?? service.process);
+  const title = $derived(compact ? serviceLabel(service) : service.project?.name ?? service.process);
   const branch = $derived(service.project?.branch);
   const metaParts = $derived(
     failed
@@ -34,7 +37,7 @@
       : stopping
         ? [t('stopping')]
         : compact
-          ? [`#${service.pid}`, ...(branch ? [branch] : [])]
+          ? []
           : [service.process, `#${service.pid}`, ...(branch ? [branch] : [])],
   );
   const ariaLabel = $derived(
@@ -48,8 +51,7 @@
   const databaseTargets = $derived(service.databaseTargets ?? []);
 
   function connectionTargetLabel(connection: NonNullable<Service['connections']>[number]): string {
-    const database = databaseTargets.find((target) => target.port === connection.port);
-    return database ? `${database.engine} · ${database.database}` : connection.target;
+    return connection.target;
   }
 
   function handleStopClick(): void {
@@ -71,33 +73,37 @@
 </script>
 
 <li class="card" aria-label={ariaLabel} data-testid="service-card">
-  <span class="tape" aria-hidden="true"></span>
   <div class="row">
     <span class="dot" aria-hidden="true"></span>
     <span class="name">{title}</span>
     <span class="ports">{portLabel}</span>
+    {#if onhide}<button class="hide" title={t('hide')} aria-label={t('hide')} onclick={onhide}>−</button>{/if}
     <button
       class="stop"
       class:stopping
       type="button"
       aria-label={t('stop')}
-      onclick={handleStopClick}
+      onclick={() => confirming = !confirming}
     >
-      ■
+      {t('stop')}
     </button>
   </div>
-  <div class="meta">
+  {#if confirming}
+    <div class="confirmation" role="group" aria-label={t('confirmStop')}>
+      <p>{t('stopNote')}</p>
+      <button disabled={stopping} onclick={handleStopClick}>{t('confirmStop')}</button>
+      <button onclick={() => confirming = false}>{t('cancel')}</button>
+    </div>
+  {/if}
+  {#if metaParts.length}<div class="meta">
     <span>{metaParts.join(' · ')}</span>
-  </div>
+  </div>{/if}
   {#if connections.length > 0}
     <div class="connections">
-      <span class="connection-label">{t('connections')}</span>
       {#each connections as connection}
         <span class:local={connection.local} class="connection">
-          <span class="connection-scope">
-            {connection.local ? t('localConnection') : t('externalConnection')}
-          </span>
           {t('connectedTo', { target: connectionTargetLabel(connection), port: connection.port })}
+          <span class="connection-scope">{connection.local ? t('localConnection') : t('externalConnection')} · {t('connections')}</span>
         </span>
       {/each}
     </div>
@@ -105,10 +111,14 @@
   {#if apiTargets.length > 0}
     <div class="connections api-targets">
       {#each apiTargets as target}
-        <span class="connection">{t('apiTarget', { target: apiTargetLabels[target.port] ?? target.host, port: target.port })}</span>
+        <span class="connection" title={`${target.host}:${target.port} — ${t('configNote')}`}>→ {apiTargetLabels[`${target.host}:${target.port}`] ?? target.host}:{target.port}<span class="connection-scope">{t('configBadge')}</span></span>
       {/each}
     </div>
   {/if}
+  {#each databaseTargets as database}
+    <div class="connections"><span class="connection" title={t('configNote')}>DB · {database.database}<span class="connection-scope">{database.engine} :{database.port} · {t('configBadge')}</span></span></div>
+  {/each}
+  <details class="meta"><summary>{t('details')}</summary><p>{service.process} · PID {service.pid}</p>{#if apiTargets.length || databaseTargets.length}<p>{t('configNote')}</p>{/if}</details>
 </li>
 
 <style>
@@ -129,7 +139,7 @@
   }
 
   /* 전시품 카드 위쪽 테이프 (site .exhibit::before 동일 형태) */
-  .tape {
+  .card::before {
     position: absolute;
     top: -0.32rem;
     left: 0.9rem;
@@ -215,12 +225,6 @@
     color: var(--stamp);
   }
 
-  .connection-label {
-    color: var(--stamp);
-    font-weight: 700;
-    text-transform: uppercase;
-  }
-
   .connection-scope {
     color: var(--ink-muted);
     font-size: 0.58rem;
@@ -231,4 +235,20 @@
   .connection.local .connection-scope {
     color: var(--stamp);
   }
+
+  .card { border: 0; border-bottom: 1px solid #d6cab4; padding: 16px; gap: 8px; box-shadow: none; }
+  .row { align-items: center; gap: 10px; }
+  .name { font-family: system-ui, sans-serif; font-size: 15px; }
+  .ports { font-size: 13px; color: var(--ink-muted); }
+  .stop, .hide { min-height: 28px; font: 12px system-ui; padding: 4px 8px; cursor: pointer; border: 1px solid #d6cab4; border-radius: 4px; background: transparent; color: var(--ink-muted); }
+  .stop:hover { color: var(--stamp); background: #a32b2b0d; }
+  .connections { display: flex; flex-direction: column; gap: 6px; padding-left: 17px; font: 13px/1.5 system-ui, sans-serif; }
+  .connection { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; overflow-wrap: anywhere; }
+  .connection-scope { flex-shrink: 0; font: 11px/1.5 system-ui; letter-spacing: 0; text-transform: none; }
+  .api-targets { border: 0; padding: 0 0 0 17px; color: var(--ink); }
+  .meta { font: 12px/1.6 system-ui; padding-left: 17px; }
+  summary { cursor: pointer; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--stamp); outline-offset: 3px; }
+  .confirmation { padding: 10px; background: #a32b2b0d; font: 12px system-ui; }
+  .confirmation button { padding: 6px 10px; margin-right: 8px; cursor: pointer; }
 </style>

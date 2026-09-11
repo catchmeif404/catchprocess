@@ -61,11 +61,13 @@ describe('ServiceCard', () => {
 
     const baseService: Service = { pid: 85610, process: 'node', ports: [3001] };
 
-    it('단일 클릭으로 즉시 중지 신호를 보내고 콜백을 호출한다', async () => {
+    it('확인 후에만 중지 신호를 보낸다', async () => {
       const onstop = vi.fn();
       render(ServiceCard, { props: { service: baseService, onstop } });
 
       await fireEvent.click(screen.getByRole('button', { name: 'stop service' }));
+      expect(mockedStop).not.toHaveBeenCalled();
+      await fireEvent.click(screen.getByRole('button', { name: 'Stop process' }));
 
       await waitFor(() => expect(mockedStop).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(mockedStop).toHaveBeenCalledWith(85610));
@@ -78,9 +80,18 @@ describe('ServiceCard', () => {
       render(ServiceCard, { props: { service: baseService, onstop } });
 
       await fireEvent.click(screen.getByRole('button', { name: 'stop service' }));
+      await fireEvent.click(screen.getByRole('button', { name: 'Stop process' }));
 
       await waitFor(() => expect(screen.getByText('stop failed')).toBeInTheDocument());
       expect(onstop).not.toHaveBeenCalled();
     });
+  });
+  it('목록 숨기기는 프로세스를 종료하지 않는다', async () => {
+    mockedStop.mockClear();
+    const onhide = vi.fn();
+    render(ServiceCard, { service: { pid: 42, process: 'node', ports: [3000] }, onhide });
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide from list' }));
+    expect(onhide).toHaveBeenCalledOnce();
+    expect(mockedStop).not.toHaveBeenCalled();
   });
 });

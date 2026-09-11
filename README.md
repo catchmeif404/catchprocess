@@ -24,6 +24,17 @@ question: **what is running right now?**
 
 ## Features / 기능
 
+- Services are grouped by project. Recognized Next.js and Spring Boot processes show framework
+  names without assuming frontend/backend roles; unknown processes retain their executable names.
+  PID is available under Details.
+  프로젝트별로 묶고 확인된 프레임워크명을 표시한다. 프론트/백엔드 역할은 추정하지 않으며 PID는 상세 보기에서 확인한다.
+- API targets found in source code and database configuration candidates are separate from
+  observed TCP connections. Defaults may differ from runtime environment overrides; a configured
+  database name is not proof of a live connection to that database. Documentation comments and
+  TypeScript declaration files are excluded from API discovery.
+  코드의 API 대상·DB 설정 후보와 실제 TCP 연결을 구분한다. 환경변수로 덮어쓴 실제 값은
+  확인하지 않으며 DB 설정 이름만으로 실제 접속 DB를 확정하지 않는다. 문서 주석과 타입 선언은 제외한다.
+
 - Live scan of listening TCP ports, attributed to processes (3s refresh) /
   리슨 중인 TCP 포트를 프로세스별로 묶어 실시간 표시 (3초 갱신)
 - Dev-relevance filter: known dev process names and ports; system noise stays out /
@@ -81,8 +92,10 @@ daemon 같은 빌드 보조 프로세스는 프로젝트 감지에서 제외한�
 
 ## Privacy / 프라이버시
 
-Everything runs locally. No network egress, no file contents are read, nothing is stored.
-모든 분석은 로컬에서만 이뤄진다. 외부 전송 없음, 파일 내용을 읽지 않음, 저장도 없음.
+Scanning runs locally. Source and configuration files are read for endpoint candidates;
+environment files and process environment values are not read. Window state is persisted.
+스캔은 로컬에서 수행한다. 연결 후보를 찾기 위해 소스·설정 파일을 읽으며 환경변수 파일과
+프로세스 환경변수 값은 읽지 않는다. 창 상태는 저장된다.
 
 ## Docs / 문서
 

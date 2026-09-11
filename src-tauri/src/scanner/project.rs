@@ -74,6 +74,8 @@ pub fn is_homebrew_root(path: &Path) -> bool {
 }
 
 fn api_target_from_token(token: &str) -> Option<ApiTarget> {
+    let token = token.split(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '`')).next()?;
+    if token.contains('@') || token.contains('$') || token.contains('{') { return None; }
     let token = token.trim_matches(|character: char| {
         matches!(character, '"' | '\'' | '`' | ')' | '}' | ']' | ',' | ';')
     });
@@ -98,9 +100,17 @@ fn api_target_from_token(token: &str) -> Option<ApiTarget> {
 
 fn extract_api_targets(text: &str) -> Vec<ApiTarget> {
     let mut targets = Vec::new();
+    let mut in_comment = false;
     for line in text.lines() {
+        let trimmed = line.trim();
+        if in_comment {
+            if trimmed.contains("*/") { in_comment = false; }
+            continue;
+        }
+        if trimmed.starts_with("/*") { in_comment = !trimmed.contains("*/"); continue; }
+        if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') { continue; }
         let lowered = line.to_lowercase();
-        if !lowered.contains("api") && !lowered.contains("baseurl") && !lowered.contains("fetch(") {
+        if !["api_base_url", "api_url", "baseurl", "fetch("].iter().any(|key| lowered.contains(key)) {
             continue;
         }
         for marker in ["http://", "https://", "localhost:", "127.0.0.1:", "[::1]:"] {
@@ -137,13 +147,14 @@ fn extract_database_targets(text: &str) -> Vec<DatabaseTarget> {
             .split(['?', ' ', '"', '\'', '}'])
             .next()
             .unwrap_or_default();
+        if database_part.contains("${") && !database_part.contains(':') { continue; }
         let database = database_part
             .split_once(':')
             .map(|(_, value)| value)
             .unwrap_or(database_part)
             .trim_matches(['{', '$', '}'])
             .to_string();
-        if database.is_empty() { continue; }
+        if database.is_empty() || !database.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.')) { continue; }
         let target = DatabaseTarget { engine, database, port };
         if !targets.contains(&target) { targets.push(target); }
     }
@@ -161,7 +172,9 @@ pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
         let Ok(entries) = fs::read_dir(&directory) else { continue; };
         for entry in entries.flatten() {
             let path = entry.path();
+            if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) { continue; }
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            if name.ends_with(".d.ts") || name.contains(".test.") || name.contains(".spec.") { continue; }
             if path.is_dir() {
                 if !matches!(name, ".git" | "node_modules" | ".next" | "target" | "dist" | "build" | ".gradle") {
                     directories.push(path);
@@ -173,6 +186,7 @@ pub fn discover_api_targets(root: &Path) -> Vec<ApiTarget> {
     }
     let mut targets = Vec::new();
     for file in files {
+        if fs::metadata(&file).map(|m| m.len() > 512 * 1024).unwrap_or(true) { continue; }
         let Ok(text) = fs::read_to_string(file) else { continue; };
         let text = text.chars().take(512 * 1024).collect::<String>();
         for target in extract_api_targets(&text) {
@@ -301,6 +315,13 @@ mod tests {
     fn extracts_external_api_default_https_port() {
         let targets = extract_api_targets("const API_BASE_URL = 'https://api.example.com';");
         assert_eq!(targets, vec![ApiTarget { host: "api.example.com".into(), port: 443 }]);
+    }
+
+    #[test]
+    fn ignores_documentation_and_secret_bearing_urls() {
+        assert!(extract_api_targets("// see https://nextjs.org/docs/app/api-reference\n/* API_URL = 'https://example.com' */").is_empty());
+        assert!(extract_api_targets("const API_URL = 'https://user:secret@api.example.com';").is_empty());
+        assert!(extract_database_targets("jdbc:postgresql://localhost:5432/${DB_NAME}").is_empty());
     }
 
     #[test]

@@ -5,10 +5,38 @@
   import { SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
+  import { apiLabel } from '$lib/service-presentation';
   import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
   import { formatClock } from '$lib/time';
   import type { Service, Snapshot } from '$lib/types';
+  import { readPreferences, preferenceKey, serviceKey } from '$lib/view-preferences';
+  let preferences = $state(readPreferences());
+  let showHidden = $state(false);
+  function saveView() {
+    try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch { /* Session state still works. */ }
+  }
+  function hideService(service: Service) {
+    preferences.hidden = [...new Set([...preferences.hidden, serviceKey(service)])];
+    saveView();
+  }
+  function restore(key: string) {
+    preferences.hidden = preferences.hidden.filter(item => item !== key);
+    saveView();
+  }
+  function toggleProject(key: string) {
+    preferences.collapsed = preferences.collapsed.includes(key)
+      ? preferences.collapsed.filter(item => item !== key) : [...preferences.collapsed, key];
+    saveView();
+  }
+  function moveProject(index: number, delta: number) {
+    const keys = projectGroups.map(group => group.key);
+    const destination = index + delta;
+    if (destination < 0 || destination >= keys.length) return;
+    [keys[index], keys[destination]] = [keys[destination], keys[index]];
+    preferences.order = [...keys, ...preferences.order.filter(key => !keys.includes(key))];
+    saveView();
+  }
 
   interface ProjectGroup {
     key: string;
@@ -34,13 +62,10 @@
     return [...groups.values()];
   }
 
-  function apiTargetLabels(service: Service, group: ProjectGroup): Record<number, string> {
-    const labels: Record<number, string> = {};
+  function apiTargetLabels(service: Service): Record<string, string> {
+    const labels: Record<string, string> = {};
     for (const target of service.apiTargets ?? []) {
-      const localService = group.services.find((candidate) => candidate.ports.includes(target.port));
-      if (localService) {
-        labels[target.port] = localService.process;
-      }
+      labels[`${target.host}:${target.port}`] = apiLabel(target, service, services);
     }
     return labels;
   }
@@ -50,8 +75,11 @@
   let query = $state('');
 
   const services = $derived(snapshot?.services ?? []);
-  const visibleServices = $derived(filterServices(services, query));
-  const projectGroups = $derived(groupServices(visibleServices));
+  const visibleServices = $derived(filterServices(services.filter(s => !preferences.hidden.includes(serviceKey(s))), query));
+  const projectGroups = $derived(groupServices(visibleServices).sort((a,b) => {
+    const rank = (key: string) => { const index = preferences.order.indexOf(key); return index < 0 ? Number.MAX_SAFE_INTEGER : index; };
+    return rank(a.key) - rank(b.key) || a.name.localeCompare(b.name);
+  }));
   const serviceCount = $derived(services.length);
   const updatedAt = $derived(
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
@@ -137,6 +165,18 @@
     />
   </div>
 
+  <div class="view-tools">
+    <button onclick={() => showHidden = !showHidden} aria-expanded={showHidden}>{t('hidden')} ({preferences.hidden.length})</button>
+  </div>
+  {#if showHidden}
+    <div class="hidden-panel">
+      <p>{t('hiddenNote')}</p>
+      {#each preferences.hidden as key}
+        <div class="hidden-row"><span>{services.find(s => serviceKey(s) === key)?.project?.name ?? key}</span><button onclick={() => restore(key)}>{t('restore')}</button></div>
+      {/each}
+    </div>
+  {/if}
+
   {#if failed}
     <p class="status error" role="alert">{t('scanFailed')}</p>
   {:else if serviceCount === 0}
@@ -144,23 +184,27 @@
   {:else if visibleServices.length === 0}
     <p class="status">{t('noMatches')}</p>
   {:else}
-    <div class="groups">
-      {#each projectGroups as group (group.key)}
+    <div class="groups" use:dragScroll>
+      {#each projectGroups as group, index (group.key)}
         <section class="project-group" aria-label={group.name}>
           <div class="project-header">
-            <span class="project-name">{group.name}</span>
+            <button class="project-name" aria-expanded={!preferences.collapsed.includes(group.key)} onclick={() => toggleProject(group.key)}>{preferences.collapsed.includes(group.key) ? '▸' : '▾'} {group.name}</button>
             {#if group.branch}<span class="branch">· {group.branch}</span>{/if}
+            <span class="project-actions"><button title={t('moveUp')} aria-label={t('moveUp')} disabled={index === 0} onclick={() => moveProject(index, -1)}>↑</button><button title={t('moveDown')} aria-label={t('moveDown')} disabled={index === projectGroups.length - 1} onclick={() => moveProject(index, 1)}>↓</button></span>
           </div>
-          <ul class="list" use:dragScroll>
+          {#if !preferences.collapsed.includes(group.key) || query.trim()}
+          <ul class="list">
             {#each group.services as service (service.pid)}
               <ServiceCard
                 {service}
                 {onstop}
+                onhide={() => hideService(service)}
                 compact
-                apiTargetLabels={apiTargetLabels(service, group)}
+                apiTargetLabels={apiTargetLabels(service)}
               />
             {/each}
           </ul>
+          {/if}
         </section>
       {/each}
     </div>
@@ -194,7 +238,6 @@
     padding: 0.3rem 0.6rem;
     border: 1px dashed rgba(36, 31, 26, 0.35);
     background: var(--paper);
-    transform: rotate(-0.6deg);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
     user-select: none;
   }
@@ -345,11 +388,11 @@
 
   /* 서류 더미 느낌: 카드마다 미세한 기울임 (site .exhibit의 --rot 변주) */
   .list :global(li:nth-child(2n)) {
-    transform: rotate(0.4deg);
+    transform: none;
   }
 
   .list :global(li:nth-child(2n + 1)) {
-    transform: rotate(-0.3deg);
+    transform: none;
   }
 
   .status {
@@ -361,11 +404,30 @@
     font-size: 0.7rem;
     font-style: italic;
     letter-spacing: 0.03em;
-    transform: rotate(-0.4deg);
   }
 
   .status.error {
     color: var(--stamp);
     font-style: normal;
   }
+
+  .widget { padding: 14px; gap: 12px; background: #e8dcc3; border: 1px solid #cdbfa6; border-radius: 12px; }
+  header { padding: 8px 2px 12px; border: 0; border-bottom: 1px solid #cdbfa6; box-shadow: none; flex-shrink: 0; }
+  .brand { font-size: 17px; }
+  .search { padding: 10px 12px; border-radius: 6px; font: 13px system-ui; }
+  .groups { flex: 1; gap: 14px; scrollbar-width: thin; }
+  .project-group { flex-shrink: 0; gap: 0; background: var(--paper-card); border: 1px solid #cdbfa6; border-radius: 8px; overflow: hidden; }
+  .project-header { padding: 10px 12px; gap: 8px; box-shadow: none; text-transform: none; }
+  .project-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; text-align: left; }
+  .project-actions { display: flex; margin-left: auto; }
+  button { cursor: pointer; font: 12px system-ui; border: 0; background: transparent; color: var(--ink); padding: 5px 7px; border-radius: 4px; }
+  button:hover { background: #241f1a0d; }
+  button:disabled { opacity: .3; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
+  .list { gap: 0; overflow: visible; }
+  .view-tools { display: flex; justify-content: flex-end; }
+  .hidden-panel { padding: 10px; max-height: 160px; overflow: auto; background: var(--paper-card); font: 12px system-ui; border-radius: 6px; }
+  .hidden-row { display: flex; align-items: center; gap: 8px; }
+  .hidden-row span { overflow-wrap: anywhere; flex: 1; }
+  .status { margin-top: 0; flex-shrink: 0; background: transparent; border: 0; padding: 0; font: 11px system-ui; }
 </style>

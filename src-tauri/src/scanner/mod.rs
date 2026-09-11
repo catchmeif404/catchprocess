@@ -150,6 +150,12 @@ pub fn scan() -> Snapshot {
     for service in &mut services {
         if let Some(process) = system.process(Pid::from_u32(service.pid)) {
             service.command = summarize_command(process.cmd());
+            let command = process.cmd().iter().map(|arg| arg.to_string_lossy()).collect::<Vec<_>>().join(" ");
+            service.framework = if command.contains("next-server") || command.contains("next/dist/") {
+                Some("nextjs".into())
+            } else if command.contains("spring-boot") || command.contains("org.springframework.boot") {
+                Some("spring".into())
+            } else { None };
             service.project = project::resolve(process.cwd());
         }
     }
