@@ -16,6 +16,7 @@
   let managedServices = $state(readManagedServices());
   let selectedConfig = $state<ManagedService | null>(null);
   let showHidden = $state(false);
+  let showConfigured = $state(false);
   function saveView() {
     try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch { /* Session state still works. */ }
   }
@@ -195,7 +196,15 @@
 
   <div class="view-tools">
     <button onclick={() => showHidden = !showHidden} aria-expanded={showHidden}>{t('hidden')} ({preferences.hidden.length})</button>
+    <button onclick={() => showConfigured = !showConfigured} aria-expanded={showConfigured}>{t('configuredServices')} ({managedServices.length})</button>
   </div>
+  {#if showConfigured}
+    <div class="hidden-panel configured-panel">
+      {#each managedServices as config (config.key)}
+        <div class="hidden-row"><span>{config.name}<small>{config.cwd}</small></span><button onclick={() => selectedConfig = { ...config }}>{t('configure')}</button></div>
+      {/each}
+    </div>
+  {/if}
   {#if showHidden}
     <div class="hidden-panel">
       <p>{t('hiddenNote')}</p>
@@ -464,5 +473,7 @@
   .hidden-panel { padding: 10px; max-height: 160px; overflow: auto; background: var(--paper-card); font: 12px system-ui; border-radius: 6px; }
   .hidden-row { display: flex; align-items: center; gap: 8px; }
   .hidden-row span { overflow-wrap: anywhere; flex: 1; }
+  .hidden-row small { display: block; margin-top: 3px; color: var(--ink-muted); font: 11px/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
+  .configured-panel { max-height: 220px; }
   .status { margin-top: 0; flex-shrink: 0; background: transparent; border: 0; padding: 0; font: 11px system-ui; }
 </style>
