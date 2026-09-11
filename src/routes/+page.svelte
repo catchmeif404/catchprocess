@@ -7,6 +7,7 @@
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
   import ServiceSettings from '$lib/components/ServiceSettings.svelte';
+  import TopologyCanvas from '$lib/components/TopologyCanvas.svelte';
   import { apiLabel } from '$lib/service-presentation';
   import { getLocale, setLocale, t } from '$lib/i18n.svelte';
   import { filterServices } from '$lib/search';
@@ -14,6 +15,7 @@
   import type { Service, Snapshot } from '$lib/types';
   import { readManagedServices, readPreferences, preferenceKey, serviceConfigKey, serviceKey, parseEnvironment, type ManagedService } from '$lib/view-preferences';
   import { matchManagedServices, type ManagedStatus } from '$lib/managed-status';
+  import { buildTopology, layoutTopology } from '$lib/topology';
   let preferences = $state(readPreferences());
   let managedServices = $state<ManagedService[]>([]);
   let selectedConfig = $state<ManagedService | null>(null);
@@ -145,6 +147,58 @@
   }));
   const serviceCount = $derived(services.length);
   const managedStatuses = $derived(matchManagedServices(managedServices, services));
+
+  // ---- 구성도(맵) 뷰 ----
+  const CANVAS_WIDTH = 552;
+  const topology = $derived(buildTopology(visibleServices, managedStatuses.filter((status) => !status.running)));
+  const laidOut = $derived(layoutTopology(topology, CANVAS_WIDTH, preferences.positions));
+  let selectedNodeId = $state<string | null>(null);
+  // 3초 폴링으로 스캔 결과가 바뀌어도 사용자가 끌어놓은 노드 위치는 유지한다.
+  function saveNodePosition(id: string, x: number, y: number): void {
+    preferences.positions = { ...preferences.positions, [id]: { x, y } };
+    saveView();
+  }
+  const selectedNode = $derived(laidOut.nodes.find((node) => node.id === selectedNodeId) ?? null);
+  function nodeConfig(node: NonNullable<typeof selectedNode>): ManagedService | null {
+    if (node.managed) return node.managed;
+    if (node.service) return managedServices.find((item) => item.key === node.id) ?? null;
+    return null;
+  }
+  let nodeBusy = $state(false);
+  let nodeError = $state('');
+  async function stopNode(node: NonNullable<typeof selectedNode>): Promise<void> {
+    if (!node.pids?.length) return;
+    nodeBusy = true; nodeError = '';
+    try {
+      for (const pid of node.pids) await stopService(pid);
+      await load();
+    } catch (error) {
+      nodeError = error instanceof Error ? error.message : String(error);
+    } finally { nodeBusy = false; }
+  }
+  async function startNode(node: NonNullable<typeof selectedNode>): Promise<void> {
+    const config = nodeConfig(node);
+    if (!config) return;
+    nodeBusy = true; nodeError = '';
+    try {
+      await startService({ command: config.runCommand, cwd: config.cwd, env: parseEnvironment(config.envText) });
+      await load();
+    } catch (error) {
+      nodeError = error instanceof Error ? error.message : String(error);
+    } finally { nodeBusy = false; }
+  }
+  function configureNode(node: NonNullable<typeof selectedNode>): void {
+    const config = nodeConfig(node);
+    if (config) {
+      selectedConfig = { ...config };
+      return;
+    }
+    if (node.service) openSettings(node.service);
+  }
+  function setView(view: 'map' | 'cards'): void {
+    preferences.view = view;
+    saveView();
+  }
   const updatedAt = $derived(
     snapshot ? formatClock(snapshot.generatedAt, getLocale()) : null,
   );
@@ -239,6 +293,10 @@
   </div>
 
   <div class="view-tools">
+    <span class="view-toggle" role="group" aria-label="view mode">
+      <button class:active={preferences.view === 'map'} onclick={() => setView('map')}>{t('viewMap')}</button>
+      <button class:active={preferences.view === 'cards'} onclick={() => setView('cards')}>{t('viewCards')}</button>
+    </span>
     <button onclick={() => showHidden = !showHidden} aria-expanded={showHidden}>{t('hidden')} ({preferences.hidden.length})</button>
     <button onclick={() => showConfigured = !showConfigured} aria-expanded={showConfigured}>{t('configuredServices')} ({managedServices.length})</button>
   </div>
@@ -275,6 +333,42 @@
     <p class="status">{t('empty')}</p>
   {:else if visibleServices.length === 0}
     <p class="status">{t('noMatches')}</p>
+  {:else if preferences.view === 'map'}
+    <div class="map-wrap">
+      <TopologyCanvas
+        nodes={laidOut.nodes}
+        edges={topology.edges}
+        width={CANVAS_WIDTH}
+        height={laidOut.height}
+        selectedId={selectedNodeId}
+        onselect={(id) => { selectedNodeId = id; nodeError = ''; }}
+        onnodemove={saveNodePosition}
+      />
+    </div>
+    {#if selectedNode}
+      <div class="node-strip" role="region" aria-label={selectedNode.label}>
+        <div class="strip-head">
+          <strong>{selectedNode.label}</strong>
+          <span class="strip-sub">{selectedNode.sub}{selectedNode.pids?.length ? ` · pid ${selectedNode.pids.join(', ')}` : ''}</span>
+          <span class="run-state" class:down={selectedNode.kind === 'offline'}>{selectedNode.kind === 'offline' ? t('statusDown') : t('statusUp', { pids: selectedNode.pids?.join(', ') ?? '' })}</span>
+          <button class="strip-close" onclick={() => selectedNodeId = null}>×</button>
+        </div>
+        {#if nodeError}<p class="panel-error" role="alert">{nodeError}</p>{/if}
+        <div class="strip-actions">
+          {#if selectedNode.kind === 'offline'}
+            <button disabled={nodeBusy || !nodeConfig(selectedNode)?.runCommand} onclick={() => void startNode(selectedNode)}>{nodeBusy ? t('working') : t('start')}</button>
+          {:else if selectedNode.pids?.length}
+            <button disabled={nodeBusy} onclick={() => void stopNode(selectedNode)}>{nodeBusy ? t('stopping') : t('stop')}</button>
+          {/if}
+          {#if nodeConfig(selectedNode)}
+            <button onclick={() => configureNode(selectedNode)}>{t('configure')}</button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+    {#if updatedAt}
+      <p class="status">{t('updatedAt', { time: updatedAt })}</p>
+    {/if}
   {:else}
     <div class="groups" use:dragScroll>
       {#each projectGroups as group, index (group.key)}
@@ -525,6 +619,17 @@
   button:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
   .list { gap: 0; overflow: visible; }
   .view-tools { display: flex; justify-content: flex-end; }
+  .view-toggle { display: flex; margin-right: auto; border: 1px solid #241f1a1a; border-radius: 5px; overflow: hidden; }
+  .view-toggle button { border-radius: 0; }
+  .view-toggle button.active { background: var(--ink); color: var(--paper); }
+  .map-wrap { overflow: auto; border-radius: 6px; }
+  .node-strip { position: sticky; bottom: 0; display: grid; gap: 6px; margin-top: 6px; padding: 10px 12px; background: var(--paper-card); border: 1px solid var(--ink); border-radius: 6px; box-shadow: 0 4px 14px rgba(36,31,26,.22); font: 12px system-ui; }
+  .strip-head { display: flex; align-items: center; gap: 8px; }
+  .strip-head strong { overflow-wrap: anywhere; }
+  .strip-sub { color: var(--ink-muted); font: 10px/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
+  .strip-close { margin-left: auto; }
+  .strip-actions { display: flex; gap: 6px; }
+  .strip-actions button { border: 1px solid #241f1a33; }
   .hidden-panel { padding: 10px; max-height: 160px; overflow: auto; background: var(--paper-card); font: 12px system-ui; border-radius: 6px; }
   .hidden-row { display: flex; align-items: center; gap: 8px; }
   .hidden-row span { overflow-wrap: anywhere; flex: 1; }

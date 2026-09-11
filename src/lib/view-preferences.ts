@@ -1,6 +1,9 @@
 import type { Service } from './types';
+import type { NodePosition } from './topology';
 
-export interface ViewPreferences { hidden: string[]; order: string[]; collapsed: string[] }
+export type ViewMode = 'map' | 'cards';
+
+export interface ViewPreferences { hidden: string[]; order: string[]; collapsed: string[]; view: ViewMode; positions: Record<string, NodePosition> }
 export interface ManagedService {
   key: string;
   name: string;
@@ -20,8 +23,22 @@ export function readPreferences(): ViewPreferences {
   try {
     const value = JSON.parse(localStorage.getItem(preferenceKey) ?? '{}');
     const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter(x => typeof x === 'string') : [];
-    return { hidden: strings(value.hidden), order: strings(value.order), collapsed: strings(value.collapsed) };
-  } catch { return { hidden: [], order: [], collapsed: [] }; }
+    const positions: Record<string, NodePosition> = {};
+    if (value.positions && typeof value.positions === 'object') {
+      for (const [id, pos] of Object.entries(value.positions as Record<string, unknown>)) {
+        if (pos && typeof pos === 'object' && typeof (pos as NodePosition).x === 'number' && typeof (pos as NodePosition).y === 'number') {
+          positions[id] = pos as NodePosition;
+        }
+      }
+    }
+    return {
+      hidden: strings(value.hidden),
+      order: strings(value.order),
+      collapsed: strings(value.collapsed),
+      view: value.view === 'cards' ? 'cards' : 'map',
+      positions,
+    };
+  } catch { return { hidden: [], order: [], collapsed: [], view: 'map', positions: {} }; }
 }
 
 export function readManagedServices(): ManagedService[] {
