@@ -2,6 +2,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { Snapshot } from './types';
+import type { ManagedService } from './view-preferences';
 
 /** Rust 쪽 #[tauri::command] 이름. */
 const COMMAND_GET_SERVICES = 'get_services';
@@ -34,4 +35,12 @@ export function startService(request: ProcessCommandRequest): Promise<number> {
 
 export function buildService(request: ProcessCommandRequest): Promise<string> {
   return invoke<string>(COMMAND_BUILD_SERVICE, { request });
+}
+
+export function loadManagedServices(): Promise<ManagedService[]> {
+  return invoke<ManagedService[]>('get_managed_services');
+}
+
+export function persistManagedServices(services: ManagedService[]): Promise<void> {
+  return invoke<void>('save_managed_services', { services });
 }

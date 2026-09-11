@@ -3,7 +3,7 @@
   // 위젯 메인 화면: 헤더(드래그 영역 + 개수 + 갱신 시각 + 닫기)와 서비스 카드 목록.
   // 데이터 페칭은 lib/api 클라이언트에 위임하고, 여기서는 3초 폴링과 상태 표시만 담당한다.
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
+  import { loadManagedServices, persistManagedServices, SCAN_INTERVAL_MS, fetchSnapshot } from '$lib/api';
   import { dragScroll } from '$lib/actions/dragScroll';
   import ServiceCard from '$lib/components/ServiceCard.svelte';
   import ServiceSettings from '$lib/components/ServiceSettings.svelte';
@@ -14,10 +14,17 @@
   import type { Service, Snapshot } from '$lib/types';
   import { readManagedServices, readPreferences, preferenceKey, serviceConfigKey, serviceKey, type ManagedService } from '$lib/view-preferences';
   let preferences = $state(readPreferences());
-  let managedServices = $state(readManagedServices());
+  let managedServices = $state<ManagedService[]>([]);
   let selectedConfig = $state<ManagedService | null>(null);
-  onMount(() => {
-    managedServices = readManagedServices();
+  onMount(async () => {
+    try {
+      const fileServices = await loadManagedServices();
+      const legacyServices = readManagedServices();
+      managedServices = fileServices.length > 0 ? fileServices : legacyServices;
+      if (fileServices.length === 0 && legacyServices.length > 0) await persistManagedServices(legacyServices);
+    } catch {
+      managedServices = readManagedServices();
+    }
   });
   let showHidden = $state(false);
   let showConfigured = $state(false);
@@ -43,7 +50,8 @@
   }
   function saveServiceConfig(config: ManagedService) {
     managedServices = [...managedServices.filter(item => item.key !== config.key), config];
-    try { localStorage.setItem(serviceConfigKey, JSON.stringify(managedServices)); } catch { /* Keep the current session usable. */ }
+    void persistManagedServices(managedServices);
+    try { localStorage.setItem(serviceConfigKey, JSON.stringify(managedServices)); } catch { /* Legacy fallback only. */ }
     selectedConfig = null;
   }
   function hideService(service: Service) {

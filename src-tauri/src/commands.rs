@@ -1,9 +1,11 @@
 //! Tauri invoke commands exposed to the Svelte widget.
 
 use crate::scanner::{self, Snapshot};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +14,17 @@ pub struct ProcessCommandRequest {
     pub cwd: String,
     #[serde(default)]
     pub env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedService {
+    pub key: String,
+    pub name: String,
+    pub cwd: String,
+    pub build_command: String,
+    pub run_command: String,
+    pub env_text: String,
 }
 
 /// One live scan of dev-relevant services; called on a 3s poll from the UI.
@@ -24,6 +37,33 @@ pub fn get_services() -> Snapshot {
 #[tauri::command]
 pub fn stop_service(pid: u32) -> Result<(), String> {
     scanner::stop::terminate(pid)
+}
+
+#[tauri::command]
+pub fn get_managed_services() -> Result<Vec<ManagedService>, String> {
+    let path = managed_services_path()?;
+    if !path.exists() { return Ok(Vec::new()); }
+    let text = fs::read_to_string(&path).map_err(|error| format!("failed to read service config: {error}"))?;
+    serde_json::from_str(&text).map_err(|error| format!("invalid service config: {error}"))
+}
+
+#[tauri::command]
+pub fn save_managed_services(services: Vec<ManagedService>) -> Result<(), String> {
+    let path = managed_services_path()?;
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|error| format!("failed to create config directory: {error}"))?; }
+    let text = serde_json::to_string_pretty(&services).map_err(|error| format!("failed to encode service config: {error}"))?;
+    fs::write(&path, format!("{text}\n")).map_err(|error| format!("failed to write service config: {error}"))?;
+    Ok(())
+}
+
+fn managed_services_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    let base = std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join("Library/Application Support/DevTopology"));
+    #[cfg(target_os = "windows")]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).map(|appdata| appdata.join("DevTopology"));
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))).map(|path| path.join("devtopology"));
+    base.map(|path| path.join("services.json")).ok_or_else(|| "could not determine config directory".into())
 }
 
 #[tauri::command]
