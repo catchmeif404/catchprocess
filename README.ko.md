@@ -103,13 +103,6 @@ cargo test --manifest-path src-tauri/Cargo.toml
 않는다. API 대상과 DB 후보를 찾기 위해 소스·설정 파일을 로컬에서 읽을 수 있지만, 환경변수
 값은 의도적으로 제외한다.
 
-## 로드맵
-
-- HTTP 서비스 상태 확인과 포트 충돌 진단
-- 프론트엔드가 꺼진 백엔드를 기대할 때 원인 표시
-- 로그인 시 자동 시작
-- 코딩 에이전트용 CLI/MCP 출력
-
 ## 문서
 
 - [`api.md`](api.md) — Tauri IPC API

@@ -102,13 +102,6 @@ Scanning runs locally. catchprocess does not send process, path, port, or connec
 remote service. Source and configuration files may be read locally to identify API targets and
 database candidates; environment values are intentionally excluded.
 
-## Roadmap
-
-- Health checks for HTTP services and port conflicts
-- Clear diagnostics when a frontend expects an offline backend
-- Optional autostart on login
-- CLI/MCP output for coding-agent context
-
 ## Docs
 
 - [`api.md`](api.md) — Tauri IPC API
