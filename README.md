@@ -1,140 +1,125 @@
+<div align="center">
+
 # catchprocess
 
-> Exhibit C: a live map of everything hiding on your own machine.
-> 전시품 C: 당신 머신 위에 숨어 있는 모든 것의 실시간 지도.
+**Exhibit C. A live case file for everything running on your machine.**
 
-An always-on-top desktop widget (macOS / Windows) that shows which development services are
-currently running on your machine — process name, port, PID — refreshed every 3 seconds.
-No browser tab, no server, no telemetry. A small card that sits on your monitor and answers one
-question: **what is running right now?**
+[한국어](README.ko.md) · **English**
 
-모니터 위에 항상 떠 있는 데스크톱 위젯(macOS / Windows)으로, 지금 머신에서 실행 중인 개발
-서비스 — 프로세스 이름, 포트, PID — 를 3초마다 갱신해 보여준다. 브라우저 탭도, 서버도,
-원격 전송도 없다. 화면 구석에 작은 카드 하나가 하나의 질문에만 답한다: **지금 뭐가 돌아가고 있나?**
+`catchmeif404`
 
-```text
-┌───────────────────────────┐
-│ catchprocess   4 running ×│
-│ ● node       :5173  #44121│
-│ ● java       :8080  #55231│
-│ ● postgres   :5432  #3332 │
-│ ● redis      :6379  #8421 │
-└───────────────────────────┘
-```
+</div>
 
-## Features / 기능
+---
 
-- Services are grouped by project. Recognized Next.js and Spring Boot processes show framework
-  names without assuming frontend/backend roles; unknown processes retain their executable names.
-  PID is available under Details.
-  프로젝트별로 묶고 확인된 프레임워크명을 표시한다. 프론트/백엔드 역할은 추정하지 않으며 PID는 상세 보기에서 확인한다.
-- API targets found in source code and database configuration candidates are separate from
-  observed TCP connections. Defaults may differ from runtime environment overrides; a configured
-  database name is not proof of a live connection to that database. Documentation comments and
-  TypeScript declaration files are excluded from API discovery.
-  코드의 API 대상·DB 설정 후보와 실제 TCP 연결을 구분한다. 환경변수로 덮어쓴 실제 값은
-  확인하지 않으며 DB 설정 이름만으로 실제 접속 DB를 확정하지 않는다. 문서 주석과 타입 선언은 제외한다.
+catchprocess is a small desktop widget for developers who have lost track of their own local
+services. It watches listening TCP ports, groups processes by project, and turns the evidence into
+a board you can inspect and control.
 
-- Live scan of listening TCP ports, attributed to processes (3s refresh) /
-  리슨 중인 TCP 포트를 프로세스별로 묶어 실시간 표시 (3초 갱신)
-- Dev-relevance filter: known dev process names and ports; system noise stays out /
-  알려진 개발 프로세스명·포트 기반 필터로 시스템 노이즈 제외
-- Project context: show the Git repository name and branch from each process working directory /
-  프로세스 작업 경로에서 Git 저장소명과 브랜치를 자동으로 표시
-- Search services by process or project name /
-  프로세스명·프로젝트명으로 서비스 검색
-- Connection mapping: show observed outbound TCP edges to local listeners or remote endpoints /
-  로컬 리스너 또는 외부 엔드포인트로 향하는 outbound TCP 연결을 표시
-- Stop a running service from its card (SIGTERM, then SIGKILL after a short grace period) /
-  카드에서 실행 중인 서비스 중지 (SIGTERM 후 짧은 유예 뒤 SIGKILL)
-- Frameless, translucent, always-on-top; drag anywhere; position is remembered /
-  프레임리스 반투명 항상 위 창. 어디로든 드래그, 위치는 기억됨
-- EN / KO UI with an in-widget language toggle /
-  위젯 안에서 전환하는 영어·한국어 UI
+No browser tab. No server. No telemetry. Just one answer: **what is running right now?**
 
-## Install / 설치
+## What it does
 
-Prebuilt bundles (macOS `.dmg`, Windows `.msi`) are attached to tagged releases.
-빌드된 설치 파일(macOS `.dmg`, Windows `.msi`)은 태그 릴리스에 첨부된다.
+- **Live service discovery** — scans listening TCP ports every three seconds and shows the process,
+  ports, PID, project, and Git branch when available.
+- **Project boards** — organize services into named boards and arrange them as a topology map.
+- **Connection evidence** — display observed local and outbound TCP connections separately from
+  source-code API targets and database configuration candidates.
+- **Start and stop controls** — launch configured services, start all offline services on a board,
+  or stop the running services on that board.
+- **Two views** — switch between a topology map and grouped service cards.
+- **Menu-bar mode** — hide the widget to the system tray/menu bar and bring it back when needed.
+- **Bilingual UI** — switch between English and Korean inside the widget.
 
-### Build from source / 소스에서 빌드
+## Install
 
-Requires Node.js >= 20 and the Rust toolchain. / Node.js 20 이상과 Rust 툴체인 필요.
+Download the installer for your platform from the [latest release](https://github.com/catchmeif404/catchprocess/releases/latest).
+
+The first macOS launch may require opening the app from Finder because the current build is not
+Apple-signed or notarized yet.
+
+## Run from source
+
+Requires Node.js 20 or later and the Rust toolchain.
 
 ```bash
-npm install
-npm run tauri build   # macOS: .app/.dmg · Windows: .msi/.exe
-npm run tauri dev     # 개발 모드 실행
+npm ci
+npm run tauri dev
 ```
 
-### Release / 배포
+To create a local installer:
 
-Production builds are created by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed.
-The workflow builds macOS Apple Silicon, macOS Intel, and Windows installers and uploads them to
-a draft GitHub Release for review before publishing.
+```bash
+npm run tauri build
+```
 
-프로덕션 빌드는 `vX.Y.Z` 태그를 push하면 `.github/workflows/release.yml`이 실행한다. macOS
-Apple Silicon, macOS Intel, Windows 설치 파일을 만든 뒤 검토할 수 있도록 GitHub Draft Release에
-업로드한다.
+The resulting `.dmg` and `.app` files are written under `src-tauri/target/release/bundle/`.
+
+## Release
+
+Production builds are created by GitHub Actions from version tags. A tag creates a draft release
+with macOS Apple Silicon, macOS Intel, and Windows installers attached.
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The repository must allow GitHub Actions to write releases. The generated macOS app is currently
-unsigned, so macOS may require opening it from Finder with the usual Gatekeeper confirmation.
-아이콘은 `src-tauri/icons/`에 생성된 catchmeif404 로고 세트를 사용한다.
+Publish the draft release after checking the generated assets. The workflow is in
+`.github/workflows/release.yml`.
 
-## How it works / 동작 방식
+## How it works
 
-The Svelte widget calls a single Tauri command, `get_services`, every 3 seconds. The Rust side
-reads the OS process table (`sysinfo`) and the TCP socket table (`netstat2`), groups listening
-ports by pid, and filters them through an allowlist of known dev process names and ports —
-defined in one place, `src-tauri/src/scanner/registry.rs`. For matching services, it reads only
-the working directory and command line needed for card context. Git metadata is used to derive
-the repository name and branch; package-manager checkouts such as Homebrew and build daemons
-such as Gradle are excluded from project detection.
-Established outbound TCP sockets are mapped to known local listeners when possible; otherwise
-the remote IP address and port are shown. This is live socket evidence, not configuration
-analysis, so an idle or short-lived request may not appear.
+The Svelte UI invokes one Tauri command, `get_services`, every three seconds. The Rust scanner uses
+`sysinfo` for the process table and `netstat2` for TCP sockets. A central registry filters out
+system noise while retaining common development processes and ports.
 
-Svelte 위젯은 단일 Tauri 커맨드 `get_services`를 3초마다 호출한다. Rust 쪽은 OS 프로세스
-테이블(`sysinfo`)과 TCP 소켓 테이블(`netstat2`)을 읽어 리슨 포트를 pid별로 묶고, 알려진 개발
-프로세스명·포트 allowlist로 걸러낸다. 기준은 `src-tauri/src/scanner/registry.rs` 한 곳에만
-정의된다. 매칭된 서비스에 한해 카드에 필요한 작업 경로와 명령줄만 추가로 읽는다. Git
-메타데이터로 저장소명과 브랜치를 도출하며, Homebrew 같은 패키지 관리자 checkout과 Gradle
-daemon 같은 빌드 보조 프로세스는 프로젝트 감지에서 제외한다.
-확립된 outbound TCP 소켓은 가능한 경우 알려진 로컬 리스너와 연결해 표시하고, 그렇지 않으면
-원격 IP 주소와 포트를 표시한다. 이는 설정 분석이 아니라 현재 소켓 상태에 대한 관찰이므로
-유휴 상태이거나 짧게 끝난 요청은 나타나지 않을 수 있다.
+Project context is derived from the process working directory and Git metadata. The scanner does
+not read environment files or process environment values. Connection rows are observations of
+current sockets, not claims that every configured dependency is live.
 
-## Privacy / 프라이버시
+## Stack
 
-Scanning runs locally. Source and configuration files are read for endpoint candidates;
-environment files and process environment values are not read. Window state is persisted.
-스캔은 로컬에서 수행한다. 연결 후보를 찾기 위해 소스·설정 파일을 읽으며 환경변수 파일과
-프로세스 환경변수 값은 읽지 않는다. 창 상태는 저장된다.
+| Area | Technology |
+|---|---|
+| Desktop shell | Tauri 2 |
+| UI | Svelte 5, TypeScript, Vite |
+| Scanner | Rust, `sysinfo`, `netstat2` |
+| Persistence | Local JSON files and window state |
+| Platforms | macOS and Windows |
 
-## Docs / 문서
+## Development checks
 
-- Implementation design / 구현 설계: [`docs/DESIGN.md`](docs/DESIGN.md)
-- IPC API / IPC API 문서: [`api.md`](api.md)
-- Roadmap / 로드맵: v0.2 project mapping → v0.3 connections → v0.4 diagnostics
-  (v0.2 프로젝트 매핑 → v0.3 연결 탐지 → v0.4 진단)
+```bash
+npm run check
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
+```
 
-## Detection notes / 탐지 참고
+## Privacy
 
-The widget shows listening TCP processes, not only application servers. Local development tools
-such as PostgreSQL, Redis, Python's `http.server`, and Java services may appear when they match
-the process or port allowlist. The stop button terminates the selected process, so use it only
-when you own that process.
+Scanning runs locally. catchprocess does not send process, path, port, or connection data to a
+remote service. Source and configuration files may be read locally to identify API targets and
+database candidates; environment values are intentionally excluded.
 
-위젯은 애플리케이션 서버만이 아니라 TCP 포트를 리슨하는 개발 관련 프로세스를 표시한다.
-PostgreSQL, Redis, Python `http.server`, Java 서비스 등이 프로세스명 또는 포트 allowlist에
-해당하면 나타날 수 있다. 중지 버튼은 선택한 프로세스를 종료하므로 직접 실행한 프로세스에만
-사용한다.
+## Roadmap
+
+- Health checks for HTTP services and port conflicts
+- Clear diagnostics when a frontend expects an offline backend
+- Optional autostart on login
+- CLI/MCP output for coding-agent context
+
+## Docs
+
+- [`api.md`](api.md) — Tauri IPC API
+- [`docs/DESIGN.md`](docs/DESIGN.md) — implementation design and roadmap
 
 ## License
 
-MIT
+MIT — see [`LICENSE`](LICENSE).
+
+<div align="center">
+
+Built by `catchmeif404` — building things nobody asked for.
+
+</div>
