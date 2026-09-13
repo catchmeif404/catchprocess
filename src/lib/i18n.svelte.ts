@@ -6,7 +6,7 @@ export type Locale = 'en' | 'ko';
 /** 로케일별 UI 문자열. 새 문자열 추가 시 두 로케일을 모두 채운다. */
 export const MESSAGES = {
   en: {
-    title: 'DevTopology',
+    title: 'catchprocess',
     servicesUp: 'subjects: {count}',
     updatedAt: 'filed {time}',
     empty: 'the desk is clear.',
@@ -74,7 +74,7 @@ export const MESSAGES = {
     apiTarget: 'API → {target}:{port}',
   },
   ko: {
-    title: 'DevTopology',
+    title: 'catchprocess',
     servicesUp: '감시 대상 {count}개',
     updatedAt: '보고 시각 {time}',
     empty: '책상이 깨끗하네.',

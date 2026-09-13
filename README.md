@@ -1,4 +1,4 @@
-# DevTopology
+# catchprocess
 
 > Exhibit C: a live map of everything hiding on your own machine.
 > 전시품 C: 당신 머신 위에 숨어 있는 모든 것의 실시간 지도.
@@ -14,7 +14,7 @@ question: **what is running right now?**
 
 ```text
 ┌───────────────────────────┐
-│ DevTopology    4 running ×│
+│ catchprocess   4 running ×│
 │ ● node       :5173  #44121│
 │ ● java       :8080  #55231│
 │ ● postgres   :5432  #3332 │
@@ -66,6 +66,25 @@ npm install
 npm run tauri build   # macOS: .app/.dmg · Windows: .msi/.exe
 npm run tauri dev     # 개발 모드 실행
 ```
+
+### Release / 배포
+
+Production builds are created by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed.
+The workflow builds macOS Apple Silicon, macOS Intel, and Windows installers and uploads them to
+a draft GitHub Release for review before publishing.
+
+프로덕션 빌드는 `vX.Y.Z` 태그를 push하면 `.github/workflows/release.yml`이 실행한다. macOS
+Apple Silicon, macOS Intel, Windows 설치 파일을 만든 뒤 검토할 수 있도록 GitHub Draft Release에
+업로드한다.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The repository must allow GitHub Actions to write releases. The generated macOS app is currently
+unsigned, so macOS may require opening it from Finder with the usual Gatekeeper confirmation.
+아이콘은 `src-tauri/icons/`에 생성된 catchmeif404 로고 세트를 사용한다.
 
 ## How it works / 동작 방식
 

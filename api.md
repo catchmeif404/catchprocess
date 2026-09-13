@@ -1,6 +1,6 @@
-# api.md — DevTopology IPC API
+# api.md — catchprocess IPC API
 
-DevTopology는 웹 서버 없이 Tauri IPC만 사용한다. 프론트엔드(Svelte)가 호출하는
+catchprocess는 웹 서버 없이 Tauri IPC만 사용한다. 프론트엔드(Svelte)가 호출하는
 Rust 커맨드를 아래에 문서화한다.
 
 ## `get_services`

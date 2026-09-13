@@ -12,7 +12,7 @@ pub fn run() {
             .with_state_flags(tauri_plugin_window_state::StateFlags::empty())
             .build())
         .setup(|app| {
-            let show = MenuItemBuilder::with_id("show", "Show DevTopology").build(app)?;
+            let show = MenuItemBuilder::with_id("show", "Show catchprocess").build(app)?;
             let hide = MenuItemBuilder::with_id("hide", "Hide window").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let separator = PredefinedMenuItem::separator(app)?;

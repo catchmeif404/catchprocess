@@ -1,6 +1,6 @@
-# devtopology design
+# catchprocess design
 
-`devtopology` answers one question about the local machine: **what is running right now?** The
+`catchprocess` answers one question about the local machine: **what is running right now?** The
 v0.1 product is an always-on-top desktop widget (macOS + Windows) that shows the developer
 services currently listening on local ports — process name, port, PID, status — refreshed live.
 
@@ -125,7 +125,7 @@ input — the sysinfo/netstat2 calls stay at the edge.
 
 - A single column of service cards sorted by port: process name, `:port` list, PID in muted
   text, a green status dot.
-- Header: `DevTopology` + count of running services + relative "updated Ns ago" timestamp.
+- Header: `catchprocess` + count of running services + relative "updated Ns ago" timestamp.
 - Empty state: "no dev services detected" (both locales).
 - UI strings come from one `i18n.ts` module with `en`/`ko` maps — bilingual from day one per the
   workspace rule; the widget surface is small enough that this is one file, not a framework.
